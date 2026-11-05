@@ -392,13 +392,13 @@ class Site:
                 continue
             rows.append("<h2>%s（%d）</h2><ul>" % (label, len(items)))
             for p in sorted(items, key=lambda x: x.title):
-                first = next((ln.strip() for ln in p.body.split("\n")
-                              if ln.strip() and not ln.startswith(("#", ">", "|"))), "")
                 rows.append('<li><a href="%s.html">%s</a> — %s</li>'
                             % (p.slug, html_mod.escape(p.title),
-                               html_mod.escape(re.sub(r"【\[\[.*?\]\]】", "", first)[:90])))
+                               html_mod.escape(_one_liner(p))))
             rows.append("</ul>")
-        return '<h1>%s</h1>%s' % (html_mod.escape(self.collection), "".join(rows))
+        label = next((c.label for c in self.cfg.collections
+                      if c.name == self.collection), self.collection)
+        return '<h1>%s</h1>%s' % (html_mod.escape(label), "".join(rows))
 
     def _layout(self, title: str, nav: str, body: str, aside: str, top: str) -> str:
         return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
@@ -449,3 +449,20 @@ def _short_cite(doc: str, heading: str) -> str:
     if len(h) > 20:
         h = h[:19] + "…"
     return "%s › %s" % (short, h)
+
+
+def _one_liner(page: contracts.Page) -> str:
+    """索引页的一句话摘要：取开头的引用块，去掉 Markdown 标记与引用，截在句末。"""
+    for line in page.body.split("\n"):
+        s = line.strip()
+        if not s.startswith(">"):
+            continue
+        s = s.lstrip("> ").replace("**一句话**：", "").replace("**", "")
+        s = re.sub(r"【\[\[.*?\]\]】", "", s).strip()
+        if not s:
+            continue
+        if len(s) > 90:
+            cut = max(s.rfind("。", 0, 90), s.rfind("；", 0, 90))
+            s = s[:cut + 1] if cut > 30 else s[:88] + "…"
+        return s
+    return ""

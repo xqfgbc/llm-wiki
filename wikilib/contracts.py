@@ -41,7 +41,14 @@ VALID_STATUS = ("active", "stale", "disputed", "draft")
 
 
 def norm_name(text: str) -> str:
-    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text or "")).lower()
+    """名称归一：NFKC → 去空白 → 去反斜杠 → 小写。
+
+    反斜杠来自 Markdown 转义（`### 4\. 高风险动作`），是显示痕迹不是语义，
+    页面引用写 `4\.` 还是 `4.` 都应当视作同一个小节。
+    """
+    t = unicodedata.normalize("NFKC", text or "")
+    t = t.replace("\\", "")
+    return re.sub(r"\s+", "", t).lower()
 
 
 @dataclass
