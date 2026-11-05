@@ -370,12 +370,36 @@ def write_raw(docs: List[NormalizedDoc], collection: str, cfg: cfgmod.WikiConfig
     for doc in docs:
         with open(os.path.join(out_dir, doc.doc_id + ".md"), "w", encoding="utf-8") as f:
             f.write(doc.to_markdown())
+        sections = dict(_section_texts(doc.body))
         mapping = [{
             "level": h.level, "norm": h.norm, "orig": h.orig,
             "line": h.line, "repaired": h.repaired,
+            "hash": hashlib.md5(
+                ("%s\x00%s" % (h.orig, sections.get(h.norm, "")))
+                .encode("utf-8")).hexdigest()[:8],
         } for h in doc.headings]
         with open(os.path.join(out_dir, doc.doc_id + ".map.json"), "w",
                   encoding="utf-8") as f:
             json.dump({"doc_id": doc.doc_id, "headings": mapping}, f,
                       ensure_ascii=False, indent=1)
     return out_dir
+
+
+def _section_texts(body: str):
+    """按 H2/H3 切出每一节的正文，用于计算小节内容 hash。"""
+    lines = body.split("\n")
+    out, cur, buf = [], "", []
+    in_fence = False
+    for line in lines:
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+        m = None if in_fence else re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+        if m:
+            if cur:
+                out.append((cur, "\n".join(buf).strip()))
+            cur, buf = m.group(2).strip(), []
+        else:
+            buf.append(line)
+    if cur:
+        out.append((cur, "\n".join(buf).strip()))
+    return out

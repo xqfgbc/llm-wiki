@@ -19,6 +19,7 @@ from . import html as html_mod
 from . import index_md as index_md_mod
 from . import plan as plan_mod
 from . import state as state_mod
+from . import contracts
 from . import query as query_mod
 from . import verify as verify_mod
 
@@ -290,6 +291,43 @@ def cmd_update(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ stamp
+def cmd_stamp(args) -> int:
+    """把当前快照的内容 hash 写进页面 frontmatter，作为后续陈旧判据。"""
+    import frontmatter
+    cfg = _cfg(args)
+    col = _collection(cfg, args)
+    snap = verify_mod.load_snapshot(os.path.join(cfg.raw_dir, col.name))
+    pages_dir = os.path.join(cfg.obsidian.wiki_root, col.name)
+
+    stamped = missing = 0
+    for path in pages_mod.page_paths(pages_dir):
+        if os.path.basename(path).upper() in ("CLAUDE.MD", "INDEX.MD", "LOG.MD"):
+            continue
+        post = frontmatter.load(path)
+        changed = False
+        for src in (post.metadata.get("sources") or []):
+            ref = str(src.get("doc", ""))
+            doc_id, _, _ = snap.resolve(ref, "")
+            doc_id = doc_id or ref
+            for c in (src.get("cites") or []):
+                key = contracts.norm_name(str(c.get("heading", "")))
+                cur = snap.hashes.get(doc_id, {}).get(key, "")
+                if not cur:
+                    missing += 1
+                    continue
+                if args.force or not c.get("hash"):
+                    c["hash"] = cur
+                    changed = True
+                    stamped += 1
+        if changed:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(frontmatter.dumps(post) + "\n")
+
+    print("已写入 hash %d 条 · 找不到对应小节的 %d 条" % (stamped, missing))
+    return 0
+
+
 # ------------------------------------------------------------------ html
 def cmd_html(args) -> int:
     cfg = _cfg(args)
@@ -427,7 +465,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--config", default=None, help="改用指定的 config.local.yaml")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    for name in ("normalize", "build", "status", "lint", "html", "update"):
+    for name in ("normalize", "build", "status", "lint", "html", "update", "stamp"):
         p = sub.add_parser(name)
         p.add_argument("--collection", default=None)
         if name == "normalize":
@@ -436,11 +474,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             p.add_argument("--strict", action="store_true")
         if name == "html":
             p.add_argument("--open", action="store_true")
-        if name == "update":
+        if name in ("update", "stamp"):
             p.add_argument("--force", action="store_true")
         p.set_defaults(func={"normalize": cmd_normalize, "build": cmd_build,
                              "status": cmd_status, "lint": cmd_lint,
-                             "html": cmd_html, "update": cmd_update}[name])
+                             "html": cmd_html, "update": cmd_update,
+                             "stamp": cmd_stamp}[name])
 
     p = sub.add_parser("query")
     p.add_argument("text")

@@ -32,6 +32,7 @@ class Result:
 class Snapshot:
     """规范化快照的标题索引：doc_id -> {norm: orig}。"""
     docs: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    hashes: Dict[str, Dict[str, str]] = field(default_factory=dict)   # doc_id -> norm -> hash
     titles: Dict[str, str] = field(default_factory=dict)      # 归一化标题 -> doc_id
     headings_all: Set[Tuple[str, str]] = field(default_factory=set)
     origins: Dict[str, str] = field(default_factory=dict)   # doc_id -> 源文件绝对路径
@@ -50,15 +51,28 @@ class Snapshot:
         return doc_id, orig, "ok"
 
 
+def _sections_text(body: str):
+    """按 H2 切分，返回 [(标题, 正文)]。"""
+    parts = re.split(r"^##\s+(.+?)\s*$", body, flags=re.M)
+    out = []
+    for i in range(1, len(parts), 2):
+        out.append((parts[i].strip(), parts[i + 1] if i + 1 < len(parts) else ""))
+    return out
+
+
 def load_snapshot(raw_dir: str) -> Snapshot:
     snap = Snapshot()
     for path in sorted(glob.glob(os.path.join(raw_dir, "*.map.json"))):
         data = json.load(open(path, encoding="utf-8"))
         doc_id = data["doc_id"]
-        heads = {}
+        heads, hashes = {}, {}
         for h in data.get("headings", []):
-            heads[contracts.norm_name(h["norm"])] = h["orig"]
+            key = contracts.norm_name(h["norm"])
+            heads[key] = h["orig"]
+            if h.get("hash"):
+                hashes[key] = h["hash"]
         snap.docs[doc_id] = heads
+        snap.hashes[doc_id] = hashes
         snap.mtime = max(snap.mtime, os.path.getmtime(path))
 
     # 标题（frontmatter.title）也要能作为 doc_ref 使用。
@@ -114,6 +128,17 @@ def verify_page(page: contracts.Page, snap: Snapshot, gl: glossary_mod.Glossary,
         out.append(Result("structure", ERROR, page.slug,
                           "H2 序列不符。期望 %d 段 %s；实际 %d 段 %s"
                           % (len(want), want, len(have), have)))
+    # ② 每段至少一条引用（来源索引除外）——契约里写了，就必须真的校验
+    # 「与其他概念的关系」豁免：那一节是导航（靠双链），不是断言。
+    # 其余各节一律要求至少一条引用——否则等于允许 LLM 写没有出处的观点。
+    EXEMPT = {"来源索引", "与其他概念的关系"}
+    for name, text in _sections_text(page.body):
+        if name in EXEMPT:
+            continue
+        if not contracts.CITE_RE.search(text):
+            out.append(Result("section_no_citation", ERROR, page.slug,
+                              "「%s」一节没有任何引用" % name))
+
     h1 = re.findall(r"^#\s+(.+)$", page.body, re.M)
     if not h1 or h1[0].strip() != page.title.strip():
         out.append(Result("h1_mismatch", ERROR, page.slug,
@@ -152,18 +177,15 @@ def verify_page(page: contracts.Page, snap: Snapshot, gl: glossary_mod.Glossary,
         out.append(Result("unused_source", WARN, page.slug,
                           "sources 声明了但正文没引用：%s#%s" % (doc, heading)))
 
-    # ⑧ 编译时间
+    # ⑧ 编译时间（只校验可解析；「是否陈旧」由 cites[] 的内容 hash 判断，
+    #    不能拿快照重建时间比——那样每重建一次全站都会误报陈旧）
     ts = str(page.meta.get("compiled_at") or "")
     try:
-        when = _dt.datetime.fromisoformat(ts)
+        _dt.datetime.fromisoformat(ts)
     except ValueError:
         out.append(Result("compiled_at", ERROR, page.slug,
                           "compiled_at 无法解析：%r" % ts))
-    else:
-        snap_date = _dt.datetime.fromtimestamp(snap.mtime).date() if snap.mtime else None
-        if snap_date and when.date() < snap_date:
-            out.append(Result("compiled_at", WARN, page.slug,
-                              "compiled_at 早于来源快照更新时间"))
+
     return out
 
 
@@ -236,6 +258,16 @@ def verify_collection(pages: List[contracts.Page], snap: Snapshot,
                 if h not in cur:
                     out.append(Result("stale", WARN, page.slug,
                                       "来源小节已消失：%s#%s" % (doc, c.get("heading"))))
+                    continue
+                old = str(c.get("hash") or "")
+                now = snap.hashes.get(doc, {}).get(h, "")
+                if old and now and old != now:
+                    out.append(Result("stale", WARN, page.slug,
+                                      "来源内容已变更：%s#%s" % (doc, c.get("heading"))))
+                elif not old:
+                    out.append(Result("unstamped", WARN, page.slug,
+                                      "未记录内容 hash，无法判断是否陈旧：%s#%s"
+                                      % (doc, c.get("heading"))))
     return out
 
 
