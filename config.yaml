@@ -1,0 +1,30 @@
+# llm-wiki 默认配置
+#
+# ⚠️ 本文件入库，**不得出现任何绝对路径**。
+#    本机路径、vault 位置、collection 清单全部写在 config.local.yaml（不入库）。
+#    校验：提交前 `git grep -nE '/(Users|home)/'` 必须为空。
+
+version: 1
+
+defaults:
+  # 切分
+  max_chunk_chars: 2500        # 单块目标上限；超过则下沉一级标题
+  hard_chunk_chars: 5000       # 硬上限；仍超过则按段落拆分并告警
+  max_heading_level: 4         # 允许按 H4 切分
+
+  # 页面
+  max_page_chars: 3000         # 超限输出拆分建议（不自动拆）
+  min_sources_per_page: 2
+  max_sources_per_page: 15
+
+  # 中文输出
+  language: zh
+  min_cjk_ratio: 0.45
+
+  # 规范化
+  heading_repair_max_len: 40   # 标题行超过此长度才考虑断行修复
+  heading_repair_min_spill: 20 # 断出的正文至少这么长，否则视为低置信度
+  warn_delete_ratio: 0.4       # 单篇删除超过此比例需文件级排除项，否则 build 失败
+
+  # 检索
+  wiki_top_k: 3

@@ -1,0 +1,27 @@
+# 数据与本地配置：一律不入库
+data/
+config.local.yaml
+*.sqlite
+*.sqlite-*
+*.log
+
+# 构建产物
+site/
+raw/
+dist/
+build/
+*.egg-info/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# 系统与编辑器
+.DS_Store
+.idea/
+.vscode/
+*.swp

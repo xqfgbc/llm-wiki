@@ -1,0 +1,23 @@
+# 本机配置模板 —— 复制为 config.local.yaml 后填写
+#
+#   cp config.local.yaml.example config.local.yaml
+#
+# config.local.yaml 已在 .gitignore 中，不会入库。
+
+version: 1
+
+obsidian:
+  # Obsidian 实际 vault 根（注册名即目录名）
+  vault_root: "/path/to/obsidian"
+  vault_name: "obsidian"
+  # wiki 页写到哪里（在 vault 内，Obsidian 可索引）
+  wiki_root: "/path/to/obsidian/wiki"
+
+# 派生物目录（索引、快照、HTML），相对本仓库根；也可写绝对路径
+data_dir: "data"
+
+collections:
+  - name: agent-security
+    label: "Agent 安全"
+    sources:
+      - "/path/to/obsidian/Agent安全"

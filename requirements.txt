@@ -1,0 +1,4 @@
+markdown-it-py>=4.0
+jieba>=0.42
+PyYAML>=6.0
+python-frontmatter>=1.1
