@@ -54,10 +54,12 @@ export WIKI_PYTHON=/path/to/.venvs/ai-wiki/bin/python3
 
 按顺序判断：
 
-1. **`weak: true` 的页只作背景**，不要用它支撑结论——它表示标题/小节与问题没有直接词面对应
-2. **`status: "stale"` 的页不能作依据**，可提示用户该页需要重编
-3. **`status: "disputed"` 的页必须呈现双方说法**
-4. `shape == "synthesis"`（对比、综述、有哪些、怎么落地）优先用 `wiki_pages` 定框架；
+1. **`uncorroborated: true` 的是笔记**：它承载原文里没有的判断。可以用它帮忙组织思路，
+   但**不能当作事实依据**，引用时必须明说「这是笔记里的判断，未见原文支撑」
+2. **`weak: true` 的页只作背景**，不要用它支撑结论——它表示标题/小节与问题没有直接词面对应
+3. **`status: "stale"` 的页不能作依据**，可提示用户该页需要重编
+4. **`status: "disputed"` 的页必须呈现双方说法**
+5. `shape == "synthesis"`（对比、综述、有哪些、怎么落地）优先用 `wiki_pages` 定框架；
    `shape == "factoid"`（具体定义、某个数）优先用 `source_hits`
 
 ### Step 3: 回答
