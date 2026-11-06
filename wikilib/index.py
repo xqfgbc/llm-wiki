@@ -62,15 +62,20 @@ CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 
 
 def connect(path: str, create: bool = False) -> sqlite3.Connection:
+    """打开索引。`create=True` 只在**文件不存在**时建表，不删库。
+
+    早先 create=True 无条件删除整个文件，多 collection 循环 build 时
+    后一个会把前一个的索引清掉，最后库里只剩最后一个 collection。
+    """
+    fresh = False
     if create:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        if os.path.exists(path):
-            os.remove(path)
+        fresh = not os.path.exists(path)
     elif not os.path.exists(path):
         raise FileNotFoundError("wiki 索引不存在：%s\n请先运行 `llm-wiki build`" % path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    if create:
+    if fresh:
         conn.executescript(SCHEMA)
     return conn
 
