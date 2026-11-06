@@ -73,23 +73,21 @@ cd "$WIKI_DIR"
 
 ## 3. 新增一个目录（collection）
 
-目前没有 CLI 命令，编辑 `config.local.yaml` 加一段即可：
+```bash
+"$WIKI_PYTHON" -m wikilib.cli collection add cloud-notes \
+  --source /path/to/obsidian/笔记/云架构 --label "云架构笔记"
 
-```yaml
-collections:
-  - name: agent-security          # 已有
-    label: "Agent 安全"
-    sources: ["/path/to/obsidian/Agent安全"]
-
-  - name: cloud-notes             # 新增
-    label: "云架构笔记"
-    sources: ["/path/to/obsidian/笔记/云架构"]
+"$WIKI_PYTHON" -m wikilib.cli init                             # 建好 concepts/entities/topics/notes
+"$WIKI_PYTHON" -m wikilib.cli build  --collection cloud-notes  # 第一次：只建索引
+"$WIKI_PYTHON" -m wikilib.cli update --collection cloud-notes  # 建立基线
 ```
 
 ```bash
-"$WIKI_PYTHON" -m wikilib.cli build --collection cloud-notes   # 第一次：只建索引
-"$WIKI_PYTHON" -m wikilib.cli update --collection cloud-notes  # 建立基线
+"$WIKI_PYTHON" -m wikilib.cli collection list      # 看现有 collection 与索引计数
+"$WIKI_PYTHON" -m wikilib.cli collection remove X  # 只从配置移除，已生成的页面不会删
 ```
+
+`collection add` 会校验源目录存在、拒绝重名；配置写回 `config.local.yaml`（该文件若含注释会被重写）。
 
 多个 collection 共用同一套 `CLAUDE.md`、`GLOSSARY.md`、`EXCLUSIONS.yaml`，
 `index.md` 里按 collection 分块，互不覆盖。
@@ -225,7 +223,8 @@ collections:
 
 - 站点在 `data/site/`，**纯静态、可离线**，双击 `index.html` 即可
 - 引用链接是 `obsidian://`，点了会跳到 Obsidian 原文的对应标题
-- 页内搜索走预生成的索引，不需要后端
+- 页内搜索走内联索引，不需要后端；**窄屏时左侧栏隐藏，搜索栏会移到页面顶部**
+- 支持多词查询（`KMS grant`）、↑↓ 选择、回车打开、Esc 关闭
 - 增量生成：内容没变的页会跳过（第二次运行通常 0.2 秒内）
 
 在 Obsidian 里也可以直接看：`obsidian/wiki/<collection>/{concepts,entities,topics}/`。
@@ -298,7 +297,9 @@ Obsidian 的双链、反链、图谱都能直接用。
 能。删掉后跑 `build` + `html` 重建。但 `wiki_state.sqlite` 删掉后，下一次 `update` 会把所有源当成「新增」重新建基线——不会出错，只是白跑一轮。
 
 **换电脑怎么迁移？**
-仓库只含代码。新机器上：`uv venv` → 装依赖 → 复制一份 `config.local.yaml` → `build`。wiki 页在 Obsidian 里，跟着 vault 走。
+仓库只含代码。新机器上：`uv venv` → 装依赖 → 复制一份 `config.local.yaml` →
+`init`（重新生成 `CLAUDE.md` / `GLOSSARY.md` / `EXCLUSIONS.yaml` 模板）→ `build`。
+wiki 页在 Obsidian 里，跟着 vault 走。
 
 **能不能让 wiki 引用 PPT 文档？**
 技术上可以（把 `obsidian/AI` 加成 collection），但目前是刻意不做的：会与知识库重复，且 PPT 派生的文档已经足够结构化，再归纳一遍收益低。
@@ -318,6 +319,8 @@ Obsidian 的双链、反链、图谱都能直接用。
 | `html [--open]` | 增量生成站点 | 0.3 秒量级 |
 | `query "<问题>" --json` | 检索（给 kg-qa 用） | 毫秒级 |
 | `usage [--json] [--import-dir]` | Token 用量统计与导入 | 秒级 |
+| `collection list/add/remove` | 目录（collection）管理 | 秒级 |
+| `init` | 部署 schema / 术语表 / 排除名单模板 | 秒级 |
 | `status` | 概览 + 排除名单自检 | 秒级 |
 | `exclude list/add/why/remove` | 排除名单维护 | 秒级 |
 
