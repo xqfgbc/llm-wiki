@@ -178,6 +178,26 @@ class TestNormalize(Base):
             exclusions.load(self.wiki)
 
 
+class TestTitleFallback(Base):
+    def test_many_h1_falls_back_to_filename(self):
+        self.write("multi-h1.md",
+                   "## A\n\nx\n\n# 第一部分\n\ny\n\n# 第二部分\n\nz\n")
+        self.write("single-h1.md", "## A\n\nx\n\n# 唯一标题\n\ny\n")
+        ex = exclusions.load(self.wiki)
+        rep = normalize.scan_collection(self.cfg.collections[0], self.cfg, ex)
+        by_id = {d.doc_id: d for d in rep.docs}
+        self.assertEqual(by_id["multi-h1"].title, "multi-h1")
+        self.assertEqual(by_id["single-h1"].title, "唯一标题")
+
+    def test_h1_inside_fence_ignored(self):
+        self.write("fenced.md",
+                   "## A\n\n```bash\n# 这是 shell 注释\nls\n```\n\n正文\n")
+        ex = exclusions.load(self.wiki)
+        rep = normalize.scan_collection(self.cfg.collections[0], self.cfg, ex)
+        self.assertEqual(rep.docs[0].title, "fenced",
+                         "代码块里的 # 不是标题")
+
+
 class TestChunk(Base):
     def test_no_chunk_crosses_fence(self):
         body = "## A\n\n```mermaid\ngraph TD\nA-->B\n```\n\n" + "文字" * 2000

@@ -356,9 +356,13 @@ def normalize_document(path: str, rel_path: str, collection: str,
     body = "\n".join(out)
     body, images = _fix_images(body, os.path.dirname(path))
 
+    # 标题回退：frontmatter → 唯一的 H1 → 文件名。
+    # 不能「取第一个 H1」：有些文档一个 H1 都没有，或者有十几个 H1
+    # （分部分、代码块里的注释行），取第一个会把「第一部分 总起」
+    # 或某行 shell 注释当成整篇标题，所有引用都会指错。
     if not title:
-        h1 = next((h.norm for h in headings if h.level == 1), "")
-        title = h1 or doc_id
+        h1s = [h.norm for h in headings if h.level == 1 and h.norm]
+        title = h1s[0] if len(h1s) == 1 else doc_id
 
     doc = NormalizedDoc(
         doc_id=doc_id,
