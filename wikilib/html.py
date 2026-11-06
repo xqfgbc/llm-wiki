@@ -341,6 +341,7 @@ class Site:
                                  self._top_html()))
         self._write(os.path.join(site_dir, "assets", "style.css"), CSS)
         stats.pruned = self._prune(site_dir)
+        self._write_search_index(site_dir)
         self._write(os.path.join(site_dir, "assets", "app.js"), APP_JS)
         stats.images = len(set(self.images.values()))
         stats.red_links = len(self.red)
@@ -578,10 +579,19 @@ class Site:
                 " autocomplete=\"off\"></div>"
                 "<div class=\"wrap\"><nav class=\"nav\">%s</nav>"
                 "<main>%s%s</main><aside>%s</aside></div>"
-                "<div id=\"hits\"></div><script>window.__WIKI_INDEX__=%s</script>"
+                "<div id=\"hits\"></div>"
+                "<script src=\"assets/search-index.js\"></script>"
                 "<script src=\"assets/app.js\"></script></body></html>"
-                % (html_mod.escape(title), nav, top, body, aside,
-                   self._search_json()))
+                % (html_mod.escape(title), nav, top, body, aside))
+
+    def _write_search_index(self, site_dir: str) -> None:
+        """索引写成独立脚本而不是内联。
+
+        内联时每一页都嵌一份完整索引，任意一页改动都会让全站页面变化，
+        增量生成退化成全量。`<script src>` 在 file:// 下可用，不受 fetch 的 CORS 限制。
+        """
+        self._write(os.path.join(site_dir, "assets", "search-index.js"),
+                    "window.__WIKI_INDEX__=%s;" % self._search_json())
 
     def _search_json(self) -> str:
         pages = []
