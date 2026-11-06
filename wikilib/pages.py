@@ -45,8 +45,11 @@ def collect(pages_dir: str, collection: str, snap: Snapshot,
                 origin = os.path.relpath(abs_origin, vault_root).replace(os.sep, "/")
             for c in (src.get("cites") or []):
                 heading = str(c.get("heading", ""))
-                orig_heading = (snap.docs.get(doc_id, {}).get(contracts.norm_name(heading))
-                                or heading)
+                heads = snap.docs.get(doc_id, {})
+                key = contracts.norm_name(heading)
+                # 空字符串表示「这是提升出来的伪标题，原文没有对应锚点」，
+                # 不能回退成标题文本，否则深链会指向不存在的位置。
+                orig_heading = heads[key] if key in heads else heading
                 h = str(c.get("hash") or "")
                 if not h and chunk_hashes:
                     h = chunk_hashes.get((doc_id, contracts.norm_name(heading)), "")

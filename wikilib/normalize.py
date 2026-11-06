@@ -76,6 +76,7 @@ class HeadingRec:
     line: int
     repaired: bool = False
     confidence: str = "none"      # high | low | none
+    synthetic: bool = False       # 由独立加粗行提升而来，原文里没有对应标题
 
 
 @dataclass
@@ -166,6 +167,26 @@ def repair_heading(text: str, max_len: int, min_spill: int) -> Tuple[str, str, s
 
 
 # ------------------------------------------------------------------ 噪音
+BOLD_LINE = re.compile(r"^\s*\*\*([^*]{4,40})\*\*\s*$")
+
+
+def _promote_bold_headings(lines: List[str]):
+    """把独立加粗行提升为二级标题，返回 (新行列表, 提升数量)。
+
+    排除以标点结尾的引导句（`**主要内容包括以下几个部分：**`），
+    它们后面跟的是列表，不是章节。
+    """
+    out, n = [], 0
+    for line in lines:
+        m = BOLD_LINE.match(line)
+        if m and not m.group(1).strip().endswith(("：", ":", "，", ",", "、", "。", "…")):
+            out.append("## " + m.group(1).strip())
+            n += 1
+        else:
+            out.append(line)
+    return out, n
+
+
 def _is_noise_heading(text: str) -> bool:
     return bool(re.match(r"^(目录|contents|books i.?ve written|further reading|"
                          r"进一步阅读|延伸阅读|参考资料)$", text.strip(), re.I))
@@ -253,6 +274,13 @@ def normalize_document(path: str, rel_path: str, collection: str,
     lines = body.split("\n")
     lines, _ = _drop_leading_boilerplate(lines)
 
+    # N8：公众号类剪藏常常整篇没有 Markdown 标题，小节只用独立加粗行表示。
+    # 这种情况按段落切会把主题打散，所以把「独占一行、长度合理、不是引导句」的
+    # 加粗行提升为二级标题。只在这种文档上做，有标题的文档一律不动。
+    promoted = 0
+    if is_clipping and not any(HEADING_RE.match(l) for l in lines):
+        lines, promoted = _promote_bold_headings(lines)
+
     max_len = int(cfg.get("heading_repair_max_len"))
     min_spill = int(cfg.get("heading_repair_min_spill"))
 
@@ -317,7 +345,8 @@ def normalize_document(path: str, rel_path: str, collection: str,
 
         headings.append(HeadingRec(level=level, orig=orig_text, norm=fixed,
                                    line=i + 1, repaired=repaired,
-                                   confidence=confidence))
+                                   confidence=confidence,
+                                   synthetic=orig_text == ""))
         i += 1
 
     body = "\n".join(out)
@@ -438,6 +467,8 @@ def write_raw(docs: List[NormalizedDoc], collection: str, cfg: cfgmod.WikiConfig
         mapping = [{
             "level": h.level, "norm": h.norm, "orig": h.orig,
             "line": h.line, "repaired": h.repaired,
+            "orig": "" if h.synthetic else h.orig,
+            "synthetic": h.synthetic,
             "hash": hashlib.md5(
                 ("%s\x00%s" % (h.orig, sections.get(h.norm, "")))
                 .encode("utf-8")).hexdigest()[:8],
