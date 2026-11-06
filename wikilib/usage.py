@@ -56,6 +56,7 @@ class Record:
     actual_in: Optional[int] = None
     actual_out: Optional[int] = None
     actual_cache_read: Optional[int] = None
+    session_id: Optional[str] = None
     note: str = ""
 
     @property
@@ -162,6 +163,50 @@ def scan_transcripts(project_dir: str,
                           "cache_read_input_tokens"):
                     total[k] += u.get(k, 0) or 0
     return total
+
+
+def import_session(cfg, project_dir: str, session_id: Optional[str] = None) -> Optional[Dict]:
+    """导入一个会话的**增量**用量，重复导入不会重复计数。
+
+    会话记录里的数字是该会话的累计值，不是增量。所以要拿
+    「当前累计 − 该会话已导入过的量」再记录；差值为零就跳过。
+    """
+    import glob
+    if not session_id:
+        cands = glob.glob(os.path.join(os.path.expanduser(project_dir), "*.jsonl"))
+        if not cands:
+            return None
+        newest = max(cands, key=os.path.getmtime)
+        session_id = os.path.splitext(os.path.basename(newest))[0]
+
+    totals = scan_transcripts(project_dir, session_id)
+    if not totals:
+        return None
+
+    prior = [r for r in load_all(cfg) if r.session_id == session_id]
+    seen_in = sum(r.actual_in or 0 for r in prior)
+    seen_out = sum(r.actual_out or 0 for r in prior)
+    seen_cache = sum(r.actual_cache_read or 0 for r in prior)
+
+    delta = {
+        "input_tokens": totals["input_tokens"] - seen_in,
+        "output_tokens": totals["output_tokens"] - seen_out,
+        "cache_read_input_tokens": totals["cache_read_input_tokens"] - seen_cache,
+        "calls": totals["calls"],
+    }
+    if delta["input_tokens"] <= 0 and delta["output_tokens"] <= 0:
+        return {"session_id": session_id, "skipped": True, "totals": totals}
+
+    record(cfg, new_record(
+        "session", "",
+        subject="会话 %s（%d 次调用）" % (session_id[:8], totals["calls"]),
+        actual_in=delta["input_tokens"], actual_out=delta["output_tokens"],
+        actual_cache_read=delta["cache_read_input_tokens"],
+        session_id=session_id,
+        note="增量导入：当前累计减去该会话已记录的量"))
+    delta["session_id"] = session_id
+    delta["skipped"] = False
+    return delta
 
 
 def format_int(n: Optional[int]) -> str:

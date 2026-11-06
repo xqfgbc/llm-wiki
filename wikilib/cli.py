@@ -482,24 +482,36 @@ def cmd_collection(args) -> int:
 
 
 # ------------------------------------------------------------------ usage
+def _latest_project_dir():
+    """在 ~/.claude/projects 下找最近被写入的会话目录。"""
+    import glob
+    cands = glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl"))
+    if not cands:
+        return None
+    return os.path.dirname(max(cands, key=os.path.getmtime))
+
+
 def cmd_usage(args) -> int:
     cfg = _cfg(args)
-    if args.import_dir:
-        t = usage_mod.scan_transcripts(os.path.expanduser(args.import_dir),
-                                       args.session)
-        if not t:
+    if args.import_dir or args.session:
+        project_dir = os.path.expanduser(args.import_dir) if args.import_dir \
+            else _latest_project_dir()
+        if not project_dir:
+            print("没找到任何会话记录")
+            return 1
+        res = usage_mod.import_session(cfg, project_dir, args.session)
+        if not res:
             print("没找到会话记录")
             return 1
-        usage_mod.record(cfg, usage_mod.new_record(
-            "session", args.collection or "",
-            subject="实际用量导入（%d 次调用）" % t["calls"],
-            actual_in=t["input_tokens"], actual_out=t["output_tokens"],
-            actual_cache_read=t["cache_read_input_tokens"],
-            note="来自 Claude Code 会话记录，含推理与工具往返"))
-        print("已导入：输入 %s · 输出 %s · 缓存读 %s"
-              % (usage_mod.format_int(t["input_tokens"]),
-                 usage_mod.format_int(t["output_tokens"]),
-                 usage_mod.format_int(t["cache_read_input_tokens"])))
+        if res["skipped"]:
+            print("会话 %s 已是最新，无新增用量（累计未变）"
+                  % res["session_id"][:8])
+        else:
+            print("会话 %s 新增：输入 %s · 输出 %s · 缓存读 %s"
+                  % (res["session_id"][:8],
+                     usage_mod.format_int(res["input_tokens"]),
+                     usage_mod.format_int(res["output_tokens"]),
+                     usage_mod.format_int(res["cache_read_input_tokens"])))
 
     records = usage_mod.load_all(cfg)
     if not records:
