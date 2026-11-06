@@ -379,6 +379,74 @@ def cmd_stamp(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ collection
+def _local_path(args) -> str:
+    return getattr(args, "config", None) or cfgmod.LOCAL_CONFIG
+
+
+def cmd_collection(args) -> int:
+    import yaml
+    path = _local_path(args)
+
+    if args.action == "list":
+        cfg = cfgmod.load(path)
+        for c in cfg.collections:
+            print("%-16s %-14s %s" % (c.name, c.label, ", ".join(c.sources)))
+            if os.path.exists(cfg.index_db):
+                conn = index_mod.connect(cfg.index_db)
+                try:
+                    n = conn.execute(
+                        "SELECT COUNT(*) FROM docs WHERE collection=? AND kind='source'",
+                        (c.name,)).fetchone()[0]
+                    m = conn.execute(
+                        "SELECT COUNT(*) FROM docs WHERE collection=? AND kind='page'",
+                        (c.name,)).fetchone()[0]
+                    print("%-16s 源文档 %d · wiki 页 %d" % ("", n, m))
+                finally:
+                    conn.close()
+        return 0
+
+    raw = {}
+    if os.path.exists(path):
+        raw = yaml.safe_load(open(path, encoding="utf-8")) or {}
+    cols = raw.setdefault("collections", [])
+
+    if args.action == "add":
+        if not args.name or not args.source:
+            print("add 需要 --name 与 --source", file=sys.stderr)
+            return 2
+        if any(c.get("name") == args.name for c in cols):
+            print("collection 已存在：%s" % args.name, file=sys.stderr)
+            return 1
+        src = os.path.abspath(os.path.expanduser(args.source))
+        if not os.path.isdir(src):
+            print("源目录不存在：%s" % src, file=sys.stderr)
+            return 1
+        cols.append({"name": args.name,
+                     "label": args.label or args.name,
+                     "sources": [src]})
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(raw, f, allow_unicode=True, sort_keys=False)
+        print("已添加 collection：%s → %s" % (args.name, src))
+        print("下一步：\n  build --collection %s    # 建索引\n"
+              "  update --collection %s   # 建立基线" % (args.name, args.name))
+        return 0
+
+    if args.action == "remove":
+        kept = [c for c in cols if c.get("name") != args.name]
+        if len(kept) == len(cols):
+            print("没有这个 collection：%s" % args.name, file=sys.stderr)
+            return 1
+        raw["collections"] = kept
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(raw, f, allow_unicode=True, sort_keys=False)
+        print("已从配置移除：%s" % args.name)
+        print("注意：已生成的 wiki 页与索引不会自动删除，需要手工清理。")
+        return 0
+
+    return 2
+
+
 # ------------------------------------------------------------------ usage
 def cmd_usage(args) -> int:
     cfg = _cfg(args)
@@ -593,6 +661,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--top-k", type=int, default=3)
     p.add_argument("--strict", action="store_true", help="出错时抛异常，不返回空列表")
     p.set_defaults(func=cmd_query)
+
+    p = sub.add_parser("collection")
+    ca = p.add_subparsers(dest="action", required=True)
+    ca.add_parser("list")
+    for action in ("add", "remove"):
+        cp = ca.add_parser(action)
+        cp.add_argument("name", nargs="?")
+        if action == "add":
+            cp.add_argument("--source", required=True)
+            cp.add_argument("--label", default=None)
+    p.set_defaults(func=cmd_collection)
 
     p = sub.add_parser("exclude")
     e = p.add_subparsers(dest="action", required=True)
