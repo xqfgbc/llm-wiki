@@ -205,10 +205,12 @@ def validate_source_path(cfg: "WikiConfig", path: str) -> str:
     if not within(real, vault):
         raise SourcePathError(
             "不在 Obsidian vault 内：%s\n  当前 vault：%s" % (real, vault))
+    # vault 根本身不行：它会把 wiki/、知识库、其它 collection 一并卷进来，
+    # 事实源就不再唯一。必须指定 vault 下的具体子目录（obsidian/XXX）。
     if real == vault:
         raise SourcePathError(
-            "不能把 vault 根目录作为源，请指定 vault 下的具体子目录")
-    if within(real, wiki) or within(wiki, real):
+            "不能把 vault 根目录作为源，请指定 vault 下的具体子目录（如 obsidian/XXX）")
+    if within(real, wiki):
         raise SourcePathError(
-            "源目录不能与 wiki 根重叠（那是派生物，不是事实来源）：%s" % wiki)
+            "源目录不能位于 wiki 根之内（那是派生物，不是事实来源）：%s" % wiki)
     return real
