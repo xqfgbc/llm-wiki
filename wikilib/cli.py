@@ -379,6 +379,40 @@ def cmd_stamp(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ init
+def cmd_init(args) -> int:
+    """把 schema / 术语表 / 排除名单模板部署到 wiki 根，并建好 collection 目录。
+
+    只写**不存在**的文件，绝不覆盖已有内容。
+    """
+    cfg = _cfg(args)
+    root = cfg.obsidian.wiki_root
+    tpl = os.path.join(cfg.repo_root, "templates")
+    os.makedirs(root, exist_ok=True)
+
+    created, skipped = [], []
+    for name in ("CLAUDE.md", "GLOSSARY.md", "EXCLUSIONS.yaml"):
+        src, dst = os.path.join(tpl, name), os.path.join(root, name)
+        if os.path.exists(dst):
+            skipped.append(name)
+            continue
+        with open(src, encoding="utf-8") as f:
+            content = f.read()
+        with open(dst, "w", encoding="utf-8") as f:
+            f.write(content)
+        created.append(name)
+
+    for col in cfg.collections:
+        for sub in ("concepts", "entities", "topics", "notes"):
+            os.makedirs(os.path.join(root, col.name, sub), exist_ok=True)
+
+    print("wiki 根：%s" % root)
+    print("新建：%s" % (", ".join(created) or "无"))
+    print("已存在跳过：%s" % (", ".join(skipped) or "无"))
+    print("目录已就绪：%s" % ", ".join(c.name for c in cfg.collections))
+    return 0
+
+
 # ------------------------------------------------------------------ collection
 def _local_path(args) -> str:
     return getattr(args, "config", None) or cfgmod.LOCAL_CONFIG
@@ -661,6 +695,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--top-k", type=int, default=3)
     p.add_argument("--strict", action="store_true", help="出错时抛异常，不返回空列表")
     p.set_defaults(func=cmd_query)
+
+    p = sub.add_parser("init")
+    p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("collection")
     ca = p.add_subparsers(dest="action", required=True)

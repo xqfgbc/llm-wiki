@@ -1,0 +1,26 @@
+# 排除名单 —— 人工维护，代码只读（可在 Obsidian 里直接编辑）
+#
+# 四级粒度，每条必须有 reason：
+#   files:    整份文件排除（最常用；重复件、机翻件）
+#   globs:    按通配符排除
+#   headings: 章节级排除（网页剪藏的「目录 / Contents / 相关文章」）
+#   terms:    不建页的术语（「致谢」「联系人」这类结构性词）
+#
+# 由 CLI 追加的条目写在 EXCLUSIONS.auto.yaml，两份在运行时合并。
+
+version: 1
+
+defaults:
+  # 网页剪藏的通用噪音章节，对所有 collection 生效
+  headings:
+    - "目录"
+    - "Contents"
+    - "Further Reading"
+    - "进一步阅读"
+  globs:
+    - "**/Pasted image*"
+    - "**/粘贴图像*"
+    - "**/.obsidian/**"
+  terms: []
+
+collections: {}
