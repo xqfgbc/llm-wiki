@@ -206,12 +206,20 @@ collections:
 ### 导入真实用量
 
 ```bash
-"$WIKI_PYTHON" -m wikilib.cli usage --import-dir \
-  "$HOME/.claude/projects/-Users-<项目目录>-<...>"
+"$WIKI_PYTHON" -m wikilib.cli usage                       # 不传参数：自动找最近写入的会话
+"$WIKI_PYTHON" -m wikilib.cli usage --import-dir <目录>    # 指定项目目录
+"$WIKI_PYTHON" -m wikilib.cli usage --session <id>        # 指定单个会话
 ```
 
-会自动包含子代理（`<session>/subagents/*.jsonl`）——并行编译的消耗占相当比例，
-只统计主会话会漏掉约三分之一。
+两条约定：
+
+- **按会话记增量**：会话记录里的数字是该会话的累计值，导入时只记
+  「当前累计 − 该会话已导入过的量」。同一会话重复导入会提示「已是最新」，不会翻倍。
+- **自动包含子代理**（`<session>/subagents/*.jsonl`）——并行编译的消耗占相当比例，
+  只统计主会话会漏掉约三分之一。
+
+**实测值不会自动累加**：换一个 session 做增量后，需要在那个 session 结束时再跑一次
+`usage`。估算值不需要这一步——`build` / `update` 会自动记录。
 
 ---
 
