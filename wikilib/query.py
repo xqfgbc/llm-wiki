@@ -117,6 +117,9 @@ def search_pages(conn, query: str, top_k: int = 3,
             "page": r["rel_path"],
             "title": r["title"],
             "weak": weak,
+            # 笔记承载的是原文里没有的判断。这里显式标出来，
+            # 调用方（kg-qa / wiki-qa）据此决定能不能把它当依据。
+            "uncorroborated": (r["type"] == "note"),
             "type": r["type"],
             "status": r["status"],
             "score": round(item["score"], 4),
