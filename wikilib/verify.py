@@ -113,7 +113,13 @@ def verify_page(page: contracts.Page, snap: Snapshot, gl: glossary_mod.Glossary,
                               % (cite.doc, cite.heading, cite.line)))
 
     # ② 结构与元数据
-    missing = [k for k in contracts.REQUIRED_META if not page.meta.get(k)]
+    is_note = page.type == "note"
+    required = contracts.REQUIRED_NOTE_META if is_note else contracts.REQUIRED_META
+    # 用「键是否存在」而不是「值是否非空」：笔记允许 sources 为空列表，
+    # 那恰恰表示「这条判断没有原文依据」。
+    missing = [k for k in required if k not in page.meta]
+    if not is_note and not page.meta.get("sources"):
+        missing.append("sources（结构化页必须至少声明一个来源）")
     if missing:
         out.append(Result("meta_missing", ERROR, page.slug,
                           "frontmatter 缺少：%s" % ", ".join(missing)))
@@ -123,21 +129,34 @@ def verify_page(page: contracts.Page, snap: Snapshot, gl: glossary_mod.Glossary,
     if page.status not in contracts.VALID_STATUS:
         out.append(Result("status_invalid", ERROR, page.slug,
                           "status 非法：%r" % page.status))
-    if page.sections != contracts.SECTIONS:
+    if is_note:
+        if page.meta.get("origin") not in contracts.NOTE_ORIGINS:
+            out.append(Result("origin_invalid", ERROR, page.slug,
+                              "笔记的 origin 必须是 %s 之一，实际 %r"
+                              % ("/".join(contracts.NOTE_ORIGINS),
+                                 page.meta.get("origin"))))
+        if not page.sections:
+            out.append(Result("structure", ERROR, page.slug,
+                              "笔记至少需要一个二级标题"))
+    elif page.sections != contracts.SECTIONS:
         have, want = page.sections, contracts.SECTIONS
         out.append(Result("structure", ERROR, page.slug,
                           "H2 序列不符。期望 %d 段 %s；实际 %d 段 %s"
                           % (len(want), want, len(have), have)))
-    # ② 每段至少一条引用（来源索引除外）——契约里写了，就必须真的校验
-    # 「与其他概念的关系」豁免：那一节是导航（靠双链），不是断言。
-    # 其余各节一律要求至少一条引用——否则等于允许 LLM 写没有出处的观点。
-    EXEMPT = set(contracts.NO_CITATION_SECTIONS)
-    for name, text in _sections_text(page.body):
-        if name in EXEMPT:
-            continue
-        if not contracts.CITE_RE.search(text):
-            out.append(Result("section_no_citation", ERROR, page.slug,
-                              "「%s」一节没有任何引用" % name))
+
+    # 每段至少一条引用（结构化页）。笔记豁免：它写的正是原文里没有的判断。
+    # 但笔记若声明了来源，就必须真的引用到，否则前后不一致。
+    if not is_note:
+        EXEMPT = set(contracts.NO_CITATION_SECTIONS)
+        for name, text in _sections_text(page.body):
+            if name in EXEMPT:
+                continue
+            if not contracts.CITE_RE.search(text):
+                out.append(Result("section_no_citation", ERROR, page.slug,
+                                  "「%s」一节没有任何引用" % name))
+    elif page.source_docs() and not page.cites:
+        out.append(Result("note_declared_no_cite", ERROR, page.slug,
+                          "笔记声明了 sources 但正文没有任何引用"))
 
     h1 = re.findall(r"^#\s+(.+)$", page.body, re.M)
     if not h1 or h1[0].strip() != page.title.strip():

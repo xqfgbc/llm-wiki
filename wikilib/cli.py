@@ -6,6 +6,8 @@ import json
 import os
 import sys
 import time
+
+import yaml
 from typing import List, Optional
 
 from . import chunk as chunk_mod
@@ -112,7 +114,9 @@ def cmd_build(args) -> int:
     state_conn = state_mod.connect(cfg.state_db)
     prev_hashes = state_mod.load_pages(state_conn, col.name)
     try:
-        state_mod.save_sources(state_conn, col.name, _states(report))
+        # ⚠️ 这里**不要**保存 sources 状态：那是 update 的职责。
+        # build 只是重建索引；如果它顺手把源基线刷新了，先 build 再 update
+        # 就永远看不到「新增文档」，新文档会一直进不了 wiki。
         state_mod.save_pages(state_conn, col.name, [
             {"slug": p.slug, "path": os.path.relpath(p.path, cfg.repo_root),
              "content_hash": p.content_hash, "status": p.status,
@@ -410,6 +414,74 @@ def cmd_init(args) -> int:
     print("新建：%s" % (", ".join(created) or "无"))
     print("已存在跳过：%s" % (", ".join(skipped) or "无"))
     print("目录已就绪：%s" % ", ".join(c.name for c in cfg.collections))
+    return 0
+
+
+# ------------------------------------------------------------------ note
+NOTE_SKELETON = """# {title}
+
+> **一句话**：（待补）
+
+## 背景
+
+## 结论
+
+## 关联
+
+{links}
+"""
+
+
+def _slugify(text: str) -> str:
+    """标题 → slug。中文标题没有可靠的音译，退回时间戳式命名。"""
+    import re as _re
+    ascii_part = _re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    if ascii_part and len(ascii_part) >= 3 and not _re.search(r"[\u4e00-\u9fff]", text):
+        return ascii_part[:60]
+    return "note-%s" % time.strftime("%Y%m%d-%H%M")
+
+
+def cmd_note(args) -> int:
+    """把一次对话的结论或人工判断落成笔记页。"""
+    cfg = _cfg(args)
+    col = _collection(cfg, args)
+    title = args.title.strip()
+    slug = args.slug or _slugify(title)
+
+    out_dir = os.path.join(cfg.obsidian.wiki_root, col.name, "notes")
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, slug + ".md")
+    if os.path.exists(path) and not args.force:
+        print("已存在：%s\n用 --force 覆盖，或换一个 --slug" % path, file=sys.stderr)
+        return 1
+
+    if args.body:
+        if not os.path.exists(args.body):
+            print("正文文件不存在：%s" % args.body, file=sys.stderr)
+            return 1
+        body = open(args.body, encoding="utf-8").read().strip()
+        if not body.startswith("# "):
+            body = "# %s\n\n%s" % (title, body)
+    else:
+        links = "\n".join("- [[%s]]" % x.strip()
+                          for x in (args.link or "").split(",") if x.strip())
+        body = NOTE_SKELETON.format(title=title, links=links or "（待补）")
+
+    meta = {
+        "title": title, "slug": slug, "type": "note", "collection": col.name,
+        "status": args.status, "origin": args.origin,
+        "compiled_by": "human", "compiled_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "language": "zh", "sources": [],
+    }
+    head = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False).strip()
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("---\n%s\n---\n\n%s\n" % (head, body))
+
+    index_md_mod.append_log(
+        os.path.join(cfg.obsidian.wiki_root, "log.md"), "note", title)
+    print("已创建笔记：%s" % path)
+    print("origin=%s · status=%s" % (args.origin, args.status))
+    print("下一步：\n  build   # 让笔记进入检索\n  lint")
     return 0
 
 
@@ -736,6 +808,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p = sub.add_parser("init")
     p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("note")
+    p.add_argument("--title", required=True)
+    p.add_argument("--slug", default=None)
+    p.add_argument("--collection", default=None)
+    p.add_argument("--origin", default="conversation",
+                   choices=list(contracts.NOTE_ORIGINS))
+    p.add_argument("--status", default="draft",
+                   choices=["active", "draft", "disputed"])
+    p.add_argument("--body", default=None, help="从 Markdown 文件导入正文")
+    p.add_argument("--link", default=None, help="关联页标题，逗号分隔")
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(func=cmd_note)
 
     p = sub.add_parser("collection")
     ca = p.add_subparsers(dest="action", required=True)

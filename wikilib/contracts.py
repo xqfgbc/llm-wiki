@@ -36,6 +36,12 @@ SECTIONS = [
 REQUIRED_META = ("title", "slug", "type", "collection", "status",
                  "compiled_by", "compiled_at", "language", "sources")
 
+# 笔记是「写回」的产物：它承载尚未被原文覆盖的判断。
+# 因此不要求七段结构，也不要求逐条引用，但必须说明来源性质（origin），
+# 否则读者分不清这是「原文归纳」还是「某次对话的结论」。
+NOTE_ORIGINS = ("conversation", "human", "imported")
+REQUIRED_NOTE_META = REQUIRED_META + ("origin",)
+
 # 不要求引用的小节：来源索引是自动生成的清单，关系段靠双链承载。
 # 定义在这里而不是散在校验代码里，避免改章节名时漏改。
 NO_CITATION_SECTIONS = ("来源索引", "与其他页的关系")
