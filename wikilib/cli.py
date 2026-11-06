@@ -336,8 +336,9 @@ def cmd_html(args) -> int:
     site = html_mod.Site(cfg, col.name, snap)
     stats = site.build()
     print("站点 %s" % os.path.relpath(cfg.site_dir, cfg.repo_root))
-    print("页 %d · 新写 %d · 未变跳过 %d · 图片 %d · 未建页 %d"
-          % (stats.pages, stats.written, stats.skipped, stats.images, stats.red_links))
+    print("页 %d · 新写 %d · 未变跳过 %d · 清理残留 %d · 图片 %d · 未建页 %d"
+          % (stats.pages, stats.written, stats.skipped, stats.pruned,
+             stats.images, stats.red_links))
     if args.open:
         import subprocess
         subprocess.run(["open", os.path.join(cfg.site_dir, "index.html")], check=False)

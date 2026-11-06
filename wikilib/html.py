@@ -110,6 +110,7 @@ class RenderStats:
     skipped: int = 0
     images: int = 0
     red_links: int = 0
+    pruned: int = 0
 
 
 class Site:
@@ -252,11 +253,22 @@ class Site:
                                  self._home_html(), self._reds_html(),
                                  self._top_html()))
         self._write(os.path.join(site_dir, "assets", "style.css"), CSS)
+        stats.pruned = self._prune(site_dir)
         self._write_search_index(site_dir)
         self._write(os.path.join(site_dir, "assets", "app.js"), APP_JS)
         stats.images = len(set(self.images.values()))
         stats.red_links = len(self.red)
         return stats
+
+    def _prune(self, site_dir: str) -> int:
+        """删掉改名/删页后残留的 html，避免站点里挂着已不存在的页。"""
+        keep = {p.slug + ".html" for p in self.pages} | {"index.html"}
+        removed = 0
+        for name in os.listdir(site_dir):
+            if name.endswith(".html") and name not in keep:
+                os.remove(os.path.join(site_dir, name))
+                removed += 1
+        return removed
 
     def _prepare_images(self, site_dir: str) -> None:
         """按 sha256 命名复制，同名不同内容也不会串。"""
