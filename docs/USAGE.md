@@ -83,7 +83,8 @@ cd "$WIKI_DIR"
 
 ### 源目录的硬约束
 
-`collection add`（以及 `/wiki-update <路径>`）**只接受 Obsidian vault 内的子目录**：
+`collection add`（以及 `/wiki-update <路径>`）**只接受 Obsidian vault 内的子目录**——
+`obsidian/笔记`、`obsidian/Agent安全` 这类可以，`obsidian/` 根目录不行：
 
 | 拒绝 | 原因 |
 |---|---|
@@ -94,6 +95,9 @@ cd "$WIKI_DIR"
 
 没有绕过开关。若确实要换 vault，改 `config.local.yaml` 的 `obsidian.vault_root`，
 而不是放宽校验。
+
+子目录之间允许嵌套，扫描时按**更具体的登记优先**：同时登记 `笔记/` 与 `笔记/云架构/`
+时，后者范围内的文档只归后者，不会在两边各索引一次。
 
 ## 3. 新增一个目录（collection）
 
