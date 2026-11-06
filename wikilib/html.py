@@ -21,6 +21,7 @@ from typing import Dict, List, Optional, Tuple
 from markdown_it import MarkdownIt
 
 from . import contracts
+from . import usage as usage_mod
 from .pages import deep_link, page_paths
 
 CITE_RE = re.compile(r"【\[\[([^\[\]#]+)#([^\[\]]+)\]\]】")
@@ -171,6 +172,7 @@ class Site:
             for a in p.aliases():
                 self.by_name.setdefault(contracts.norm_name(a), p)
 
+        self.usage_records = usage_mod.load_all(cfg)
         self.cite_map, self.origin_map = self._build_cite_map()
         self.images: Dict[str, str] = {}
         self.red: Dict[str, int] = {}
@@ -359,10 +361,18 @@ class Site:
     def _top_html(self) -> str:
         stale = sum(1 for p in self.pages if p.status == "stale")
         disputed = sum(1 for p in self.pages if p.status == "disputed")
+        tok = ''
+        if self.usage_records:
+            u = usage_mod.summary(self.usage_records)
+            if u["est_total"]:
+                tok = '<span>累计 ≈ %s tokens</span>' % format(u["est_total"], ",")
+            elif u["actual_total"]:
+                tok = '<span>累计实测 %s tokens</span>' % format(u["actual_total"], ",")
         return ('<div class="top"><span>%d 页</span><span>陈旧 %d</span>'
-                '<span>争议 %d</span><span>未建页 %d</span>'
+                '<span>争议 %d</span><span>未建页 %d</span>%s'
                 '<span>%s</span></div>'
-                % (len(self.pages), stale, disputed, len(self.red), self.collection))
+                % (len(self.pages), stale, disputed, len(self.red), tok,
+                   self.collection))
 
     def _nav_html(self, current: Optional[str]) -> str:
         groups: Dict[str, List[contracts.Page]] = {}
@@ -450,7 +460,44 @@ class Site:
             rows.append("</ul>")
         label = next((c.label for c in self.cfg.collections
                       if c.name == self.collection), self.collection)
-        return '<h1>%s</h1>%s' % (html_mod.escape(label), "".join(rows))
+        return ('<h1>%s</h1>%s%s'
+                % (html_mod.escape(label), "".join(rows), self._usage_html()))
+
+    def _usage_html(self) -> str:
+        if not self.usage_records:
+            return ""
+        s = usage_mod.summary(self.usage_records)
+        parts = ['<h2>Token 用量</h2>',
+                 '<p style="font-size:13px;color:var(--muted)">'
+                 '估算值来自「交给模型的文本量 × 固定系数」，不含推理开销；'
+                 '实测值来自会话记录，只在导入后出现。</p>',
+                 '<table><thead><tr><th>时间</th><th>操作</th><th>对象</th>'
+                 '<th style="text-align:right">估算输入</th>'
+                 '<th style="text-align:right">估算输出</th>'
+                 '<th style="text-align:right">实测</th></tr></thead><tbody>']
+        for r in self.usage_records[-12:][::-1]:
+            parts.append(
+                '<tr><td>%s</td><td>%s</td><td>%s</td>'
+                '<td style="text-align:right">%s</td>'
+                '<td style="text-align:right">%s</td>'
+                '<td style="text-align:right">%s</td></tr>'
+                % (html_mod.escape(r.ts[:16].replace("T", " ")),
+                   html_mod.escape(r.op), html_mod.escape((r.subject or "")[:40]),
+                   usage_mod.format_int(r.est_in), usage_mod.format_int(r.est_out),
+                   usage_mod.format_int(r.actual_total)))
+        def cell(v):
+            return format(v, ",") if v else "—"
+        parts.append('</tbody><tfoot><tr><th>累计（%d 次）</th><th></th><th>%d 页</th>'
+                     '<th style="text-align:right">%s</th>'
+                     '<th style="text-align:right">%s</th>'
+                     '<th style="text-align:right">%s</th></tr></tfoot></table>'
+                     % (s["ops"], s["pages"], cell(s["est_in"]),
+                        cell(s["est_out"]), cell(s["actual_total"])))
+        if s["actual_cache_read"]:
+            parts.append('<p style="font-size:12.5px;color:var(--muted)">'
+                         '另：缓存读 %s tokens（长会话每轮重读上下文，单价极低）</p>'
+                         % format(s["actual_cache_read"], ","))
+        return "".join(parts)
 
     def _layout(self, title: str, nav: str, body: str, aside: str, top: str) -> str:
         return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"

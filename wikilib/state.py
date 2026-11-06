@@ -94,6 +94,14 @@ def save_pages(conn, collection: str, pages: List[Dict]) -> None:
     conn.commit()
 
 
+def load_pages(conn, collection: str) -> Dict[str, str]:
+    """slug -> content_hash，用于判断本次构建有哪些页发生了变化。"""
+    return {r["slug"]: r["content_hash"] or ""
+            for r in conn.execute(
+                "SELECT slug, content_hash FROM pages WHERE collection=?",
+                (collection,))}
+
+
 def record_run(conn, collection: str, mode: str, started: float, stats: Dict) -> str:
     run_id = "%s-%s" % (time.strftime("%Y%m%d-%H%M%S"), mode)
     conn.execute(

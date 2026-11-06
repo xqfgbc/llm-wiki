@@ -19,6 +19,7 @@ from . import html as html_mod
 from . import index_md as index_md_mod
 from . import plan as plan_mod
 from . import state as state_mod
+from . import usage as usage_mod
 from . import contracts
 from . import query as query_mod
 from . import verify as verify_mod
@@ -109,6 +110,7 @@ def cmd_build(args) -> int:
 
     total = sum(len(v) for v in chunks.values())
     state_conn = state_mod.connect(cfg.state_db)
+    prev_hashes = state_mod.load_pages(state_conn, col.name)
     try:
         state_mod.save_sources(state_conn, col.name, _states(report))
         state_mod.save_pages(state_conn, col.name, [
@@ -122,6 +124,8 @@ def cmd_build(args) -> int:
     page_objs = verify_mod.load_pages(os.path.join(cfg.obsidian.wiki_root, col.name))
     index_md_mod.write_index(cfg.obsidian.wiki_root, col.name, col.label, page_objs,
                              _status_counts(page_objs))
+
+    _record_build_usage(cfg, col, page_objs, prev_hashes, report, chunks)
 
     print("collection : %s" % col.name)
     print("文档 %d · 源切片 %d · wiki 页 %d（%d 段）· 库 %s"
@@ -267,6 +271,16 @@ def cmd_update(args) -> int:
             orders.append(plan_mod.build_order(slug, imps, existing, srcs, excerpt))
 
         paths = plan_mod.write_orders(orders, os.path.join(cfg.orders_dir, col.name))
+        order_text = "\n".join(open(x, encoding="utf-8").read() for x in paths)
+        if orders:
+            usage_mod.record(cfg, usage_mod.new_record(
+                "update", col.name,
+                subject="产出 %d 份 work order" % len(orders),
+                pages=[o["slug"] for o in orders],
+                chars_in=len(order_text),
+                est_in=usage_mod.estimate_tokens(order_text),
+                note="输入=work order 正文；撰写阶段的实际消耗需在下一次 build 或 import 时统计",
+            ))
         state_mod.save_sources(conn, col.name, current)
         state_mod.save_pages(conn, col.name, [
             {"slug": p.slug, "path": os.path.relpath(p.path, cfg.repo_root),
@@ -289,6 +303,43 @@ def cmd_update(args) -> int:
                          events=[("update", "新增 %d / 变更 %d / 删除 %d"
                                   % (len(diff.added), len(diff.modified), len(diff.deleted)))])
     return 0
+
+
+def _record_build_usage(cfg, col, page_objs, prev_hashes, report, chunks):
+    """记录本次构建相对上次的增量：改了哪些页、读了多少来源、产出多少字。
+
+    输入按「被引用的切片正文」计，输出按「改动的页面正文」计。
+    两边都按中英文字符分别折算，避免把英文来源按中文系数算高一倍。
+    """
+    changed = [p for p in page_objs if prev_hashes.get(p.slug) != p.content_hash]
+    if not changed:
+        return
+
+    body_of = {}
+    for doc in report.docs:
+        for ch in chunks.get(doc.doc_id, []):
+            body_of[(doc.doc_id, contracts.norm_name(ch.heading))] = ch.body
+
+    in_text, out_text = [], []
+    for page in changed:
+        for src in page.source_docs():
+            doc_id = src.get("doc", "")
+            for c in (src.get("cites") or []):
+                body = body_of.get((doc_id, contracts.norm_name(str(c.get("heading", "")))))
+                if body:
+                    in_text.append(body)
+        out_text.append(page.body)
+
+    t_in, t_out = "\n".join(in_text), "\n".join(out_text)
+    usage_mod.record(cfg, usage_mod.new_record(
+        "build", col.name,
+        subject="编译/更新 %d 页" % len(changed),
+        pages=[p.slug for p in changed],
+        chars_in=len(t_in), chars_out=len(t_out),
+        est_in=usage_mod.estimate_tokens(t_in),
+        est_out=usage_mod.estimate_tokens(t_out),
+        note="输入=被引用的来源切片，输出=改动的页面正文；均为估算",
+    ))
 
 
 # ------------------------------------------------------------------ stamp
@@ -325,6 +376,53 @@ def cmd_stamp(args) -> int:
                 f.write(frontmatter.dumps(post) + "\n")
 
     print("已写入 hash %d 条 · 找不到对应小节的 %d 条" % (stamped, missing))
+    return 0
+
+
+# ------------------------------------------------------------------ usage
+def cmd_usage(args) -> int:
+    cfg = _cfg(args)
+    if args.import_dir:
+        t = usage_mod.scan_transcripts(os.path.expanduser(args.import_dir),
+                                       args.session)
+        if not t:
+            print("没找到会话记录")
+            return 1
+        usage_mod.record(cfg, usage_mod.new_record(
+            "session", args.collection or "",
+            subject="实际用量导入（%d 次调用）" % t["calls"],
+            actual_in=t["input_tokens"], actual_out=t["output_tokens"],
+            actual_cache_read=t["cache_read_input_tokens"],
+            note="来自 Claude Code 会话记录，含推理与工具往返"))
+        print("已导入：输入 %s · 输出 %s · 缓存读 %s"
+              % (usage_mod.format_int(t["input_tokens"]),
+                 usage_mod.format_int(t["output_tokens"]),
+                 usage_mod.format_int(t["cache_read_input_tokens"])))
+
+    records = usage_mod.load_all(cfg)
+    if not records:
+        print("还没有用量记录")
+        return 0
+    s = usage_mod.summary(records)
+    if args.json:
+        print(json.dumps({"summary": s, "records": [vars(r) for r in records]},
+                         ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    print("累计 %d 次记录 · %d 页产出" % (s["ops"], s["pages"]))
+    print("  估算：输入 %s · 输出 %s · 合计 %s"
+          % (format(s["est_in"], ","), format(s["est_out"], ","),
+             format(s["est_total"], ",")))
+    if s["actual_total"]:
+        print("  实测：输入 %s · 输出 %s · 合计 %s（缓存读 %s）"
+              % (format(s["actual_in"], ","), format(s["actual_out"], ","),
+                 format(s["actual_total"], ","), format(s["actual_cache_read"], ",")))
+    print()
+    print("%-20s %-8s %-34s %10s %10s" % ("时间", "操作", "对象", "估算输入", "估算输出"))
+    for r in records[-12:]:
+        print("%-20s %-8s %-34s %10s %10s"
+              % (r.ts[5:19], r.op, (r.subject or "")[:32],
+                 format(r.est_in, ","), format(r.est_out, ",")))
     return 0
 
 
@@ -466,7 +564,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--config", default=None, help="改用指定的 config.local.yaml")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    for name in ("normalize", "build", "status", "lint", "html", "update", "stamp"):
+    for name in ("normalize", "build", "status", "lint", "html", "update",
+                 "stamp", "usage"):
         p = sub.add_parser(name)
         p.add_argument("--collection", default=None)
         if name == "normalize":
@@ -477,10 +576,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             p.add_argument("--open", action="store_true")
         if name in ("update", "stamp"):
             p.add_argument("--force", action="store_true")
+        if name == "usage":
+            p.add_argument("--json", action="store_true")
+            p.add_argument("--import-dir", default=None,
+                           help="导入 Claude Code 会话记录目录")
+            p.add_argument("--session", default=None, help="指定会话 id")
         p.set_defaults(func={"normalize": cmd_normalize, "build": cmd_build,
                              "status": cmd_status, "lint": cmd_lint,
                              "html": cmd_html, "update": cmd_update,
-                             "stamp": cmd_stamp}[name])
+                             "stamp": cmd_stamp, "usage": cmd_usage}[name])
 
     p = sub.add_parser("query")
     p.add_argument("text")

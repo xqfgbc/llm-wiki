@@ -180,6 +180,43 @@ collections:
 
 ---
 
+## 6. Token 用量观测
+
+```bash
+"$WIKI_PYTHON" -m wikilib.cli usage          # 累计 + 最近 12 次
+"$WIKI_PYTHON" -m wikilib.cli usage --json   # 机读
+```
+
+站点首页底部有同名的 **Token 用量** 面板，顶部状态栏也会显示累计值。
+
+### 两种数字，不要混着看
+
+| | 来源 | 含义 | 何时有 |
+|---|---|---|---|
+| **估算** | 管道自己算 | 交给模型的文本量 × 固定系数（中文 0.9/字，其余 0.25/字符） | 每次 `build` / `update` 自动记录 |
+| **实测** | Claude Code 会话记录 | 真实的输入/输出 token，含推理与工具往返 | 手动 `usage --import-dir` 导入 |
+
+估算**不含**模型推理开销与系统提示，因此总是低于实测。
+
+### 每次操作记录了什么
+
+- `build`：本次**改动了哪些页**、这些页引用了多少来源字数（输入）、产出多少正文字数（输出）
+- `update`：本次产出多少份 work order、order 正文多少字（输入）
+
+记录写在 `data/usage.jsonl`，一行一次，可自行追加或删除。
+
+### 导入真实用量
+
+```bash
+"$WIKI_PYTHON" -m wikilib.cli usage --import-dir \
+  "$HOME/.claude/projects/-Users-<项目目录>-<...>"
+```
+
+会自动包含子代理（`<session>/subagents/*.jsonl`）——并行编译的消耗占相当比例，
+只统计主会话会漏掉约三分之一。
+
+---
+
 ## 6. 看结果
 
 ```bash
@@ -196,7 +233,7 @@ Obsidian 的双链、反链、图谱都能直接用。
 
 ---
 
-## 7. 给 kg-qa 用
+## 8. 给 kg-qa 用
 
 ```bash
 "$WIKI_PYTHON" -m wikilib.cli query "Agent 调用 API 时凭证放在哪里" --json
@@ -230,7 +267,7 @@ Obsidian 的双链、反链、图谱都能直接用。
 
 ---
 
-## 8. 什么放 wiki、什么放知识库
+## 9. 什么放 wiki、什么放知识库
 
 | | 知识库（AI-KG） | Wiki（llm-wiki） |
 |---|---|---|
@@ -243,7 +280,7 @@ Obsidian 的双链、反链、图谱都能直接用。
 
 ---
 
-## 9. 常见问题
+## 10. 常见问题
 
 **为什么我的标题被改了？**
 网页剪藏常把标题和正文首句粘在一起（`### 新的攻击面STS 将所有…`）。规范化只做「断行」，不改字，且只改快照不改源文件。想看改了什么：`normalize --dry-run`。
@@ -268,7 +305,7 @@ Obsidian 的双链、反链、图谱都能直接用。
 
 ---
 
-## 10. 命令速查
+## 11. 命令速查
 
 | 命令 | 作用 | 耗时 |
 |---|---|---|
@@ -280,6 +317,7 @@ Obsidian 的双链、反链、图谱都能直接用。
 | `lint [--strict]` | 确定性校验 | 秒级 |
 | `html [--open]` | 增量生成站点 | 0.3 秒量级 |
 | `query "<问题>" --json` | 检索（给 kg-qa 用） | 毫秒级 |
+| `usage [--json] [--import-dir]` | Token 用量统计与导入 | 秒级 |
 | `status` | 概览 + 排除名单自检 | 秒级 |
 | `exclude list/add/why/remove` | 排除名单维护 | 秒级 |
 
