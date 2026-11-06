@@ -76,25 +76,33 @@ border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:8px}
 .src{margin-bottom:10px}
 .src .t{font-size:12.5px;color:var(--muted)}
 .reds a{display:block;font-size:13px;color:var(--red)}
-#q{width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:6px;
+.qbox{width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:6px;
 background:var(--card);color:var(--fg);font-size:13px;margin-bottom:14px}
-#q:focus{outline:2px solid var(--accent);outline-offset:1px}
-#hits{display:none;position:fixed;left:16px;top:66px;width:310px;max-height:62vh;
-overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;
-box-shadow:0 10px 30px rgba(0,0,0,.22);z-index:60;padding:6px}
+.qbox:focus{outline:2px solid var(--accent);outline-offset:1px}
+.mbar{display:none}
+#hits{display:none;position:fixed;max-height:62vh;overflow:auto;background:var(--card);
+border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.22);
+z-index:90;padding:6px}
 #hits.on{display:block}
 #hits .cnt{font-size:11.5px;color:var(--muted);padding:4px 8px 6px}
 #hits a{display:block;padding:6px 8px;border-radius:5px;font-size:13.5px;color:var(--fg)}
 #hits a:hover,#hits a.sel{background:rgba(127,127,127,.14)}
 #hits a small{color:var(--muted);font-size:11.5px;margin-left:6px}
 #hits mark{background:rgba(108,182,255,.35);color:inherit;border-radius:2px}
-@media(max-width:1000px){.wrap{grid-template-columns:1fr}
-nav,aside{display:none}main{padding:20px}}
+@media(max-width:1000px){
+.wrap{grid-template-columns:1fr}
+nav,aside{display:none}
+main{padding:16px}
+.mbar{display:block;position:sticky;top:0;z-index:80;background:var(--bg);
+padding:10px 16px;border-bottom:1px solid var(--line)}
+.mbar .qbox{margin:0}
+}
 """
 
 APP_JS = r"""
 const idx=window.__WIKI_INDEX__||{pages:[]};
-const q=document.getElementById('q'),hits=document.getElementById('hits');
+const hits=document.getElementById('hits');
+const boxes=[...document.querySelectorAll('.qbox')];
 const TYPES={concept:'概念',entity:'实体',topic:'主题',note:'笔记'};
 const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const hl=(t,s)=>esc(t).replace(new RegExp('('+s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>');
@@ -114,30 +122,41 @@ function score(p,s){
   }
   return n;
 }
-let sel=-1,items=[];
+let active=null,sel=-1,items=[];
+function place(){
+  if(!active)return;
+  const r=active.getBoundingClientRect();
+  hits.style.left=Math.max(8,r.left)+'px';
+  hits.style.top=(r.bottom+6)+'px';
+  hits.style.width=Math.max(300,r.width)+'px';
+}
 function render(){
-  const s=q.value.trim();
+  if(!active)return;
+  const s=active.value.trim();
   if(!s){hits.className='';hits.innerHTML='';items=[];sel=-1;return;}
   const r=idx.pages.map(p=>({p,n:score(p,s)})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n).slice(0,12);
-  items=r;sel=-1;hits.className='on';
+  items=r;sel=-1;hits.className='on';place();
   if(!r.length){hits.innerHTML='<div class="cnt">没有匹配「'+esc(s)+'」</div>';return;}
   hits.innerHTML='<div class="cnt">'+r.length+' 条结果 · ↑↓ 选择，回车打开，Esc 关闭</div>'
     +r.map((x,i)=>`<a href="${x.p.slug}.html" data-i="${i}">${hl(x.p.title,s)}<small>${TYPES[x.p.type]||x.p.type}</small></a>`).join('');
 }
-q.addEventListener('input',render);
-q.addEventListener('focus',()=>{if(q.value.trim())render();});
+for(const b of boxes){
+  b.addEventListener('focus',()=>{active=b;if(b.value.trim())render();});
+  b.addEventListener('input',()=>{active=b;render();});
+}
+window.addEventListener('resize',place);
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){q.value='';render();q.blur();return;}
+  if(e.key==='Escape'){if(active)active.value='';render();if(active)active.blur();return;}
   if(!items.length)return;
   if(e.key==='ArrowDown'||e.key==='ArrowUp'){
     e.preventDefault();
     sel=(sel+(e.key==='ArrowDown'?1:-1)+items.length)%items.length;
     [...hits.querySelectorAll('a')].forEach((a,i)=>a.classList.toggle('sel',i===sel));
   }
-  if(e.key==='Enter'&&sel>=0){location.href=items[sel].p.slug+'.html';}
+  if(e.key==='Enter'&&sel>=0)location.href=items[sel].p.slug+'.html';
 });
 document.addEventListener('click',e=>{
-  if(!hits.contains(e.target)&&e.target!==q){hits.className='';}
+  if(!hits.contains(e.target)&&!e.target.classList.contains('qbox'))hits.className='';
 });
 """
 
@@ -379,7 +398,7 @@ class Site:
         for p in self.pages:
             groups.setdefault(p.type or "other", []).append(p)
         labels = {"concept": "概念", "entity": "实体", "topic": "主题", "note": "笔记"}
-        out = ['<input id="q" placeholder="搜索…" autocomplete="off"><div id="hits"></div>']
+        out = ['<input class="qbox" placeholder="搜索…" autocomplete="off">']
         for typ in ("concept", "entity", "topic", "note"):
             if typ not in groups:
                 continue
@@ -503,9 +522,11 @@ class Site:
         return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
                 "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                 "<title>%s</title><link rel=\"stylesheet\" href=\"assets/style.css\"></head>"
-                "<body><div class=\"wrap\"><nav class=\"nav\">%s</nav>"
+                "<body><div class=\"mbar\"><input class=\"qbox\" placeholder=\"搜索…\""
+                " autocomplete=\"off\"></div>"
+                "<div class=\"wrap\"><nav class=\"nav\">%s</nav>"
                 "<main>%s%s</main><aside>%s</aside></div>"
-                "<script>window.__WIKI_INDEX__=%s</script>"
+                "<div id=\"hits\"></div><script>window.__WIKI_INDEX__=%s</script>"
                 "<script src=\"assets/app.js\"></script></body></html>"
                 % (html_mod.escape(title), nav, top, body, aside,
                    self._search_json()))
