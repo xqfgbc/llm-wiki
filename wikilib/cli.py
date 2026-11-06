@@ -786,7 +786,17 @@ def cmd_lint(args) -> int:
         print("还没有 wiki 页：%s" % pages_dir)
         return 0
 
-    results = verify_mod.verify_collection(pages, snap, gl, cfg)
+    extra = set()
+    for other in cfg.collections:
+        if other.name == col.name:
+            continue
+        for op in verify_mod.load_pages(
+                os.path.join(cfg.obsidian.wiki_root, other.name)):
+            extra.add(contracts.norm_name(op.title))
+            extra.add(contracts.norm_name(op.slug))
+            for a in op.aliases():
+                extra.add(contracts.norm_name(a))
+    results = verify_mod.verify_collection(pages, snap, gl, cfg, extra)
     err, warn = verify_mod.summarize(results)
 
     for r in results:

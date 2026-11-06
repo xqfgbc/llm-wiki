@@ -209,7 +209,8 @@ def verify_page(page: contracts.Page, snap: Snapshot, gl: glossary_mod.Glossary,
 
 
 def verify_collection(pages: List[contracts.Page], snap: Snapshot,
-                      gl: glossary_mod.Glossary, cfg) -> List[Result]:
+                      gl: glossary_mod.Glossary, cfg,
+                      extra_known: Optional[Set[str]] = None) -> List[Result]:
     out: List[Result] = []
     max_chars = int(cfg.get("max_page_chars"))
     min_cjk = float(cfg.get("min_cjk_ratio"))
@@ -239,6 +240,7 @@ def verify_collection(pages: List[contracts.Page], snap: Snapshot,
     known = {contracts.norm_name(p.slug) for p in pages}
     known |= {contracts.norm_name(p.title) for p in pages}
     known |= set(snap.titles)          # 指向源文档的链接不算断链
+    known |= (extra_known or set())    # 其它 collection 的页：跨集合链接不算断链
     for p in pages:
         for a in p.aliases():
             known.add(contracts.norm_name(a))
