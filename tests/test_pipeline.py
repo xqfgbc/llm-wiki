@@ -405,6 +405,27 @@ class TestPlanAndUsage(Base):
         recs = [r for r in usage.load_all(self.cfg) if r.session_id == "abc"]
         self.assertEqual(sum(r.actual_in for r in recs), 100)
 
+    def test_usage_kind_separation(self):
+        """开发 wiki 的消耗不能混进内容产出。"""
+        usage.record(self.cfg, usage.new_record(
+            "build", "notes", subject="编译", est_in=100, est_out=50))
+        usage.record(self.cfg, usage.new_record(
+            "session", "", subject="开发", actual_in=1000, actual_out=500,
+            session_id="dev1", kind=usage.KIND_DEV))
+        recs = usage.load_all(self.cfg)
+        content = usage.summary(recs, kind=usage.KIND_CONTENT)
+        dev = usage.summary(recs, kind=usage.KIND_DEV)
+        self.assertEqual(content["est_total"], 150)
+        self.assertEqual(content["actual_total"], 0)
+        self.assertEqual(dev["actual_total"], 1500)
+
+    def test_cursor_roundtrip(self):
+        usage.save_cursor(self.cfg, "abc", {"input_tokens": 10,
+                                            "output_tokens": 5,
+                                            "cache_read_input_tokens": 0})
+        cur = usage.load_cursor(self.cfg)
+        self.assertEqual(cur["abc"]["input_tokens"], 10)
+
     def test_config_rejects_paths_outside_vault(self):
         with self.assertRaises(config.SourcePathError):
             config.validate_source_path(self.cfg, "/tmp")

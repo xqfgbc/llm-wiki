@@ -42,11 +42,16 @@ def path_for(cfg) -> str:
     return os.path.join(cfg.data_dir, "usage.jsonl")
 
 
+KIND_CONTENT = "content"          # 产出 wiki 内容（编译页面）
+KIND_DEV = "dev"                  # 开发 / 修 wiki 代码本身，不计入内容成本
+
+
 @dataclass
 class Record:
     ts: str
     op: str                       # update | build | session
     collection: str
+    kind: str = KIND_CONTENT      # content | dev
     subject: str = ""
     pages: List[str] = field(default_factory=list)
     chars_in: int = 0
@@ -94,7 +99,10 @@ def load_all(cfg) -> List[Record]:
     return out
 
 
-def summary(records: List[Record]) -> Dict:
+def summary(records: List[Record], kind: Optional[str] = None) -> Dict:
+    """`kind=None` 统计全部；`kind="content"` 只统计内容产出。"""
+    if kind is not None:
+        records = [r for r in records if (r.kind or KIND_CONTENT) == kind]
     est_in = sum(r.est_in for r in records)
     est_out = sum(r.est_out for r in records)
     act_in = sum(r.actual_in or 0 for r in records)
@@ -165,7 +173,38 @@ def scan_transcripts(project_dir: str,
     return total
 
 
-def import_session(cfg, project_dir: str, session_id: Optional[str] = None) -> Optional[Dict]:
+# ---------------------------------------------------------------- 游标
+# 会话累计值 → 增量，需要记住「上次读到哪」。游标单独存，不写进 usage.jsonl，
+# 因为它不是消耗记录，只是一个读数。
+def _cursor_path(cfg) -> str:
+    return os.path.join(cfg.data_dir, "usage_cursor.json")
+
+
+def load_cursor(cfg) -> Dict:
+    path = _cursor_path(cfg)
+    if not os.path.exists(path):
+        return {}
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_cursor(cfg, session_id: str, totals: Dict) -> None:
+    path = _cursor_path(cfg)
+    cur = load_cursor(cfg)
+    cur[session_id] = {
+        "input_tokens": totals.get("input_tokens", 0),
+        "output_tokens": totals.get("output_tokens", 0),
+        "cache_read_input_tokens": totals.get("cache_read_input_tokens", 0),
+    }
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cur, f, ensure_ascii=False, indent=1)
+
+
+def import_session(cfg, project_dir: str, session_id: Optional[str] = None,
+                   kind: str = KIND_CONTENT, checkpoint: bool = False) -> Optional[Dict]:
     """导入一个会话的**增量**用量，重复导入不会重复计数。
 
     会话记录里的数字是该会话的累计值，不是增量。所以要拿
@@ -183,10 +222,14 @@ def import_session(cfg, project_dir: str, session_id: Optional[str] = None) -> O
     if not totals:
         return None
 
-    prior = [r for r in load_all(cfg) if r.session_id == session_id]
-    seen_in = sum(r.actual_in or 0 for r in prior)
-    seen_out = sum(r.actual_out or 0 for r in prior)
-    seen_cache = sum(r.actual_cache_read or 0 for r in prior)
+    seen = load_cursor(cfg).get(session_id) or {}
+    seen_in = seen.get("input_tokens", 0)
+    seen_out = seen.get("output_tokens", 0)
+    seen_cache = seen.get("cache_read_input_tokens", 0)
+
+    if checkpoint:
+        save_cursor(cfg, session_id, totals)
+        return {"session_id": session_id, "checkpoint": True, "totals": totals}
 
     delta = {
         "input_tokens": totals["input_tokens"] - seen_in,
@@ -199,11 +242,13 @@ def import_session(cfg, project_dir: str, session_id: Optional[str] = None) -> O
 
     record(cfg, new_record(
         "session", "",
+        kind=kind,
         subject="会话 %s（%d 次调用）" % (session_id[:8], totals["calls"]),
         actual_in=delta["input_tokens"], actual_out=delta["output_tokens"],
         actual_cache_read=delta["cache_read_input_tokens"],
         session_id=session_id,
-        note="增量导入：当前累计减去该会话已记录的量"))
+        note="增量导入：当前读数减去上次读数（%s）" % kind))
+    save_cursor(cfg, session_id, totals)
     delta["session_id"] = session_id
     delta["skipped"] = False
     return delta

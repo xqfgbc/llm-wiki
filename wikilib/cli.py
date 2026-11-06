@@ -712,16 +712,22 @@ def cmd_usage(args) -> int:
         if not project_dir:
             print("没找到任何会话记录")
             return 1
-        res = usage_mod.import_session(cfg, project_dir, args.session)
+        res = usage_mod.import_session(cfg, project_dir, args.session,
+                                       kind=args.kind,
+                                       checkpoint=args.checkpoint)
         if not res:
             print("没找到会话记录")
             return 1
+        if res.get("checkpoint"):
+            print("已记录读数（会话 %s）：后续导入只统计此后的增量"
+                  % res["session_id"][:8])
+            return 0
         if res["skipped"]:
             print("会话 %s 已是最新，无新增用量（累计未变）"
                   % res["session_id"][:8])
         else:
-            print("会话 %s 新增：输入 %s · 输出 %s · 缓存读 %s"
-                  % (res["session_id"][:8],
+            print("会话 %s 新增（%s）：输入 %s · 输出 %s · 缓存读 %s"
+                  % (res["session_id"][:8], args.kind,
                      usage_mod.format_int(res["input_tokens"]),
                      usage_mod.format_int(res["output_tokens"]),
                      usage_mod.format_int(res["cache_read_input_tokens"])))
@@ -730,13 +736,15 @@ def cmd_usage(args) -> int:
     if not records:
         print("还没有用量记录")
         return 0
-    s = usage_mod.summary(records)
+    s = usage_mod.summary(records, kind=usage_mod.KIND_CONTENT)
+    dev = usage_mod.summary(records, kind=usage_mod.KIND_DEV)
     if args.json:
-        print(json.dumps({"summary": s, "records": [vars(r) for r in records]},
+        print(json.dumps({"content": s, "dev": dev,
+                          "records": [vars(r) for r in records]},
                          ensure_ascii=False, indent=2, default=str))
         return 0
 
-    print("累计 %d 次记录 · %d 页产出" % (s["ops"], s["pages"]))
+    print("内容产出（计入）：%d 次记录 · %d 页" % (s["ops"], s["pages"]))
     print("  估算：输入 %s · 输出 %s · 合计 %s"
           % (format(s["est_in"], ","), format(s["est_out"], ","),
              format(s["est_total"], ",")))
@@ -744,11 +752,15 @@ def cmd_usage(args) -> int:
         print("  实测：输入 %s · 输出 %s · 合计 %s（缓存读 %s）"
               % (format(s["actual_in"], ","), format(s["actual_out"], ","),
                  format(s["actual_total"], ","), format(s["actual_cache_read"], ",")))
+    if dev["actual_total"] or dev["est_total"]:
+        print("开发消耗（不计入）：实测 %s · 估算 %s"
+              % (format(dev["actual_total"], ","), format(dev["est_total"], ",")))
     print()
-    print("%-20s %-8s %-34s %10s %10s" % ("时间", "操作", "对象", "估算输入", "估算输出"))
+    print("%-18s %-8s %-6s %-28s %10s %10s"
+          % ("时间", "操作", "类别", "对象", "估算输入", "估算输出"))
     for r in records[-12:]:
-        print("%-20s %-8s %-34s %10s %10s"
-              % (r.ts[5:19], r.op, (r.subject or "")[:32],
+        print("%-18s %-8s %-6s %-28s %10s %10s"
+              % (r.ts[5:19], r.op, r.kind or "content", (r.subject or "")[:26],
                  format(r.est_in, ","), format(r.est_out, ",")))
     return 0
 
@@ -924,6 +936,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             p.add_argument("--import-dir", default=None,
                            help="导入 Claude Code 会话记录目录")
             p.add_argument("--session", default=None, help="指定会话 id")
+            p.add_argument("--kind", default="content",
+                           choices=["content", "dev"],
+                           help="content=产出 wiki 内容；dev=开发 wiki 本身")
+            p.add_argument("--checkpoint", action="store_true",
+                           help="只记录当前读数，不统计（用于划出内容产出的起点）")
         p.set_defaults(func={"normalize": cmd_normalize, "build": cmd_build,
                              "status": cmd_status, "lint": cmd_lint,
                              "html": cmd_html, "update": cmd_update,
