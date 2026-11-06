@@ -116,7 +116,13 @@ def _resolve(path: str) -> str:
     return os.path.normpath(os.path.join(REPO_ROOT, path))
 
 
-def load(local_path: Optional[str] = None) -> WikiConfig:
+def load(local_path: Optional[str] = None, strict_sources: bool = True) -> WikiConfig:
+    """读配置。
+
+    `strict_sources=False` 时只校验结构，不要求每个源目录都存在——
+    管理类命令（collection add/list/init）用它，否则只要有一个旧目录失效，
+    连新增一个目录都做不了。
+    """
     base = _load_yaml(DEFAULT_CONFIG)
     local = _load_yaml(local_path or LOCAL_CONFIG)
     if not local:
@@ -146,9 +152,11 @@ def load(local_path: Optional[str] = None) -> WikiConfig:
         sources = [_resolve(s) for s in (raw.get("sources") or [])]
         if not sources:
             raise ConfigError("collection %s 没有 sources" % raw["name"])
-        for s in sources:
-            if not os.path.isdir(s):
-                raise ConfigError("collection %s 的源目录不存在：%s" % (raw["name"], s))
+        if strict_sources:
+            for s in sources:
+                if not os.path.isdir(s):
+                    raise ConfigError("collection %s 的源目录不存在：%s"
+                                      % (raw["name"], s))
         collections.append(CollectionConfig(
             name=str(raw["name"]),
             label=str(raw.get("label") or raw["name"]),
@@ -160,3 +168,47 @@ def load(local_path: Optional[str] = None) -> WikiConfig:
 
     return WikiConfig(obsidian=obsidian, data_dir=data_dir,
                       defaults=defaults, collections=collections)
+
+
+# ============================================================
+# 源目录校验
+#
+# 事实源必须唯一。所以源目录只能是**Obsidian vault 内的某个子目录**：
+# 既不能是任意文件系统路径，也不能是 vault 里的派生物目录（wiki/），
+# 否则同一份事实会被两套索引分别认领。
+# ============================================================
+
+class SourcePathError(ConfigError):
+    pass
+
+
+def validate_source_path(cfg: "WikiConfig", path: str) -> str:
+    """校验并返回规范化后的绝对路径；不合规抛 SourcePathError。"""
+    real = os.path.realpath(os.path.expanduser(path))
+    vault = os.path.realpath(cfg.obsidian.vault_root)
+    wiki = os.path.realpath(cfg.obsidian.wiki_root)
+
+    if not os.path.exists(real):
+        raise SourcePathError("路径不存在：%s" % path)
+    if not os.path.isdir(real):
+        raise SourcePathError("不是目录：%s" % path)
+    if not os.path.isdir(os.path.join(vault, ".obsidian")):
+        raise SourcePathError(
+            "配置的 vault_root 不是 Obsidian vault（缺少 .obsidian）：%s" % vault)
+
+    def within(child: str, parent: str) -> bool:
+        try:
+            return os.path.commonpath([child, parent]) == parent
+        except ValueError:              # 不同盘符
+            return False
+
+    if not within(real, vault):
+        raise SourcePathError(
+            "不在 Obsidian vault 内：%s\n  当前 vault：%s" % (real, vault))
+    if real == vault:
+        raise SourcePathError(
+            "不能把 vault 根目录作为源，请指定 vault 下的具体子目录")
+    if within(real, wiki) or within(wiki, real):
+        raise SourcePathError(
+            "源目录不能与 wiki 根重叠（那是派生物，不是事实来源）：%s" % wiki)
+    return real

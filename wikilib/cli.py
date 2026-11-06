@@ -423,7 +423,26 @@ def cmd_collection(args) -> int:
     path = _local_path(args)
 
     if args.action == "list":
-        cfg = cfgmod.load(path)
+        cfg = cfgmod.load(path, strict_sources=False)
+        if getattr(args, "json", False):
+            out = []
+            for c in cfg.collections:
+                item = {"name": c.name, "label": c.label, "sources": c.sources,
+                        "docs": 0, "pages": 0}
+                if os.path.exists(cfg.index_db):
+                    conn = index_mod.connect(cfg.index_db)
+                    try:
+                        item["docs"] = conn.execute(
+                            "SELECT COUNT(*) FROM docs WHERE collection=? AND kind='source'",
+                            (c.name,)).fetchone()[0]
+                        item["pages"] = conn.execute(
+                            "SELECT COUNT(*) FROM docs WHERE collection=? AND kind='page'",
+                            (c.name,)).fetchone()[0]
+                    finally:
+                        conn.close()
+                out.append(item)
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+            return 0
         for c in cfg.collections:
             print("%-16s %-14s %s" % (c.name, c.label, ", ".join(c.sources)))
             if os.path.exists(cfg.index_db):
@@ -452,10 +471,17 @@ def cmd_collection(args) -> int:
         if any(c.get("name") == args.name for c in cols):
             print("collection 已存在：%s" % args.name, file=sys.stderr)
             return 1
-        src = os.path.abspath(os.path.expanduser(args.source))
-        if not os.path.isdir(src):
-            print("源目录不存在：%s" % src, file=sys.stderr)
+        # 只接受 Obsidian vault 内的子目录：事实源必须唯一
+        try:
+            src = cfgmod.validate_source_path(
+                cfgmod.load(path, strict_sources=False), args.source)
+        except cfgmod.ConfigError as exc:
+            print("源目录不合规：%s" % exc, file=sys.stderr)
             return 1
+        for c in cols:
+            if src in [os.path.realpath(x) for x in (c.get("sources") or [])]:
+                print("该路径已登记为 collection「%s」，无需重复添加" % c.get("name"))
+                return 0
         cols.append({"name": args.name,
                      "label": args.label or args.name,
                      "sources": [src]})
@@ -713,13 +739,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p = sub.add_parser("collection")
     ca = p.add_subparsers(dest="action", required=True)
-    ca.add_parser("list")
+    lp = ca.add_parser("list")
+    lp.add_argument("--json", action="store_true")
     for action in ("add", "remove"):
         cp = ca.add_parser(action)
         cp.add_argument("name", nargs="?")
         if action == "add":
             cp.add_argument("--source", required=True)
             cp.add_argument("--label", default=None)
+
     p.set_defaults(func=cmd_collection)
 
     p = sub.add_parser("exclude")
