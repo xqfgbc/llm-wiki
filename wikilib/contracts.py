@@ -27,7 +27,7 @@ SECTIONS = [
     "定义与边界",
     "关键构成",
     "在本知识库中的证据",
-    "与其他概念的关系",
+    "与其他页的关系",
     "争议与不同说法",
     "适用范围与局限",
     "来源索引",
@@ -36,12 +36,16 @@ SECTIONS = [
 REQUIRED_META = ("title", "slug", "type", "collection", "status",
                  "compiled_by", "compiled_at", "language", "sources")
 
+# 不要求引用的小节：来源索引是自动生成的清单，关系段靠双链承载。
+# 定义在这里而不是散在校验代码里，避免改章节名时漏改。
+NO_CITATION_SECTIONS = ("来源索引", "与其他页的关系")
+
 VALID_TYPES = ("concept", "entity", "topic", "note")
 VALID_STATUS = ("active", "stale", "disputed", "draft")
 
 
 def norm_name(text: str) -> str:
-    """名称归一：NFKC → 去空白 → 去反斜杠 → 小写。
+    r"""名称归一：NFKC → 去空白 → 去反斜杠 → 小写。
 
     反斜杠来自 Markdown 转义（`### 4\. 高风险动作`），是显示痕迹不是语义，
     页面引用写 `4\.` 还是 `4.` 都应当视作同一个小节。

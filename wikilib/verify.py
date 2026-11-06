@@ -131,7 +131,7 @@ def verify_page(page: contracts.Page, snap: Snapshot, gl: glossary_mod.Glossary,
     # ② 每段至少一条引用（来源索引除外）——契约里写了，就必须真的校验
     # 「与其他概念的关系」豁免：那一节是导航（靠双链），不是断言。
     # 其余各节一律要求至少一条引用——否则等于允许 LLM 写没有出处的观点。
-    EXEMPT = {"来源索引", "与其他概念的关系"}
+    EXEMPT = set(contracts.NO_CITATION_SECTIONS)
     for name, text in _sections_text(page.body):
         if name in EXEMPT:
             continue
