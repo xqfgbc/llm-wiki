@@ -206,6 +206,55 @@ collections:
 
 ---
 
+## 5.5 写回：把对话或结论沉淀成页
+
+高价值的问答、分析、决策理由，可以写回成 wiki 页，让下次检索能直接命中。
+
+### 先判断写回成什么
+
+| 内容性质 | 写成 | 说明 |
+|---|---|---|
+| 结论能逐条追到原文 | `topic` 页 | 正常七段结构 + 引用，能自证 |
+| 结论来自推理或讨论，原文没有直接对应 | `note` 页 | `sources: []`，靠 `origin` 说明来源 |
+| 只是对某页的补充 | 直接改那一页 | 不制造第二处事实 |
+
+**不要为了「看起来有据」硬挂引用**——那比不引用更糟。
+
+### 建笔记
+
+```bash
+"$WIKI_PYTHON" -m wikilib.cli note \
+  --title "为什么把凭证代理做成独立层" \
+  --slug why-broker-as-layer \
+  --link "凭证代理模式,令牌库"
+
+"$WIKI_PYTHON" -m wikilib.cli build && "$WIKI_PYTHON" -m wikilib.cli lint
+```
+
+也可以直接导入一段 Markdown（比如 kg-qa 的回答）：
+
+```bash
+"$WIKI_PYTHON" -m wikilib.cli note --title "Agent 身份的三跳模型" \
+  --body /tmp/answer.md --origin conversation
+```
+
+笔记的契约比正式页宽松：
+
+- **不要求七段结构**，但至少一个二级标题
+- **不要求逐节引用**；但若声明了 `sources`，正文必须真的引用到，否则 `lint` 报错
+- `origin` 必填（`conversation` / `human` / `imported`），读者据此判断可信度
+- 编译流程永不覆盖笔记；`update` 会把它当作只读
+
+### 从笔记升级为正式页
+
+判断后来被原文证实了，就升级：
+
+1. 复制到 `topics/` 或 `concepts/`，`type` 改为对应类型，删掉 `origin`
+2. 按七段结构重写，逐条补引用
+3. 原笔记删除或标记 `status: stale`
+
+直接把笔记的 `type` 改掉不会成功——结构校验会立刻失败，这是有意的。
+
 ## 6. Token 用量观测
 
 ```bash
