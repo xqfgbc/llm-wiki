@@ -71,6 +71,30 @@ cd "$WIKI_DIR"
 
 ---
 
+## 2.5 技能（Claude Code 里用）
+
+| 技能 | 用途 |
+|---|---|
+| `/wiki-update` | 增量更新。无参数 = 同步全部已登记目录；带路径 = 先校验登记再更新 |
+| `/wiki-qa` | 从 wiki 查询内容交给大模型，附原始出处 |
+| `/llm-wiki` | 底层命令入口（build / lint / html / exclude / usage 等） |
+
+三个技能都是软链到 `~/.claude/skills/`，源在本仓库 `skills/`，改动即时生效。
+
+### 源目录的硬约束
+
+`collection add`（以及 `/wiki-update <路径>`）**只接受 Obsidian vault 内的子目录**：
+
+| 拒绝 | 原因 |
+|---|---|
+| 不在 vault 内 | 事实源会散落到任意位置 |
+| 等于 vault 根 | 会把 `wiki/` 自己也当成源 |
+| 与 wiki 根重叠 | 派生物不能反过来当事实来源 |
+| 不是目录 | 传了文件 |
+
+没有绕过开关。若确实要换 vault，改 `config.local.yaml` 的 `obsidian.vault_root`，
+而不是放宽校验。
+
 ## 3. 新增一个目录（collection）
 
 ```bash
