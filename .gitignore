@@ -25,3 +25,7 @@ venv/
 .idea/
 .vscode/
 *.swp
+
+# 技能本地配置（含本机绝对路径）
+.env
+skills/*/.env
