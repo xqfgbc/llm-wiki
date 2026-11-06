@@ -458,6 +458,80 @@ def cmd_init(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ doctor
+def cmd_doctor(args) -> int:
+    """对真实数据做一致性体检：索引、快照、页面三者是否对得上。"""
+    cfg = _cfg(args)
+    problems = []
+    notes = []
+
+    # 1 配置里的 collection 是否都有索引与快照
+    names = {c.name for c in cfg.collections}
+    if os.path.exists(cfg.index_db):
+        conn = index_mod.connect(cfg.index_db)
+        try:
+            db_cols = {r[0] for r in conn.execute(
+                "SELECT DISTINCT collection FROM docs")}
+            for col in sorted(names - db_cols):
+                problems.append("collection 未索引：%s" % col)
+            for col in sorted(db_cols - names):
+                problems.append("索引里有已删除的 collection：%s" % col)
+
+            for col in sorted(names & db_cols):
+                n_idx = conn.execute(
+                    "SELECT COUNT(*) FROM docs WHERE collection=? AND kind='source'",
+                    (col,)).fetchone()[0]
+                n_raw = len([f for f in os.listdir(os.path.join(cfg.raw_dir, col))
+                             if f.endswith(".md")]) if os.path.isdir(
+                    os.path.join(cfg.raw_dir, col)) else 0
+                if n_idx != n_raw:
+                    problems.append("%s：索引 %d 篇，快照 %d 篇" % (col, n_idx, n_raw))
+                n_page_idx = conn.execute(
+                    "SELECT COUNT(*) FROM docs WHERE collection=? AND kind='page'",
+                    (col,)).fetchone()[0]
+                pdir = os.path.join(cfg.obsidian.wiki_root, col)
+                n_page_file = len([p for p in pages_mod.page_paths(pdir)
+                                   if os.path.basename(p).upper()
+                                   not in ("CLAUDE.MD", "INDEX.MD", "LOG.MD")
+                                   ]) if os.path.isdir(pdir) else 0
+                if n_page_idx != n_page_file:
+                    problems.append("%s：索引 %d 页，磁盘 %d 页"
+                                    % (col, n_page_idx, n_page_file))
+        finally:
+            conn.close()
+    else:
+        problems.append("索引不存在：%s" % cfg.index_db)
+
+    # 2 页面自身
+    for col in sorted(names):
+        pdir = os.path.join(cfg.obsidian.wiki_root, col)
+        if not os.path.isdir(pdir):
+            notes.append("%s 还没有 wiki 目录（正常，尚未建页）" % col)
+            continue
+        for path in pages_mod.page_paths(pdir):
+            page = contracts.parse_page(path)
+            if page.type not in contracts.VALID_TYPES:
+                problems.append("%s：type 非法 %r" % (path, page.meta.get("type")))
+            if page.meta.get("collection") != col:
+                problems.append("%s：frontmatter.collection=%r，实际目录是 %s"
+                                % (path, page.meta.get("collection"), col))
+
+    # 3 快照目录没有对应 collection
+    if os.path.isdir(cfg.raw_dir):
+        for d in os.listdir(cfg.raw_dir):
+            if d.startswith("."):
+                continue
+            if d not in names:
+                notes.append("快照目录无对应 collection：raw/%s（可删）" % d)
+
+    print("collection %d 个 · 问题 %d · 提示 %d" % (len(names), len(problems), len(notes)))
+    for p in problems:
+        print("  ✗ %s" % p)
+    for n in notes:
+        print("  · %s" % n)
+    return 1 if problems else 0
+
+
 # ------------------------------------------------------------------ note
 NOTE_SKELETON = """# {title}
 
@@ -855,6 +929,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p = sub.add_parser("init")
     p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("doctor")
+    p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("note")
     p.add_argument("--title", required=True)
