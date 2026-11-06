@@ -267,6 +267,28 @@ collections:
 
 站点首页底部有同名的 **Token 用量** 面板，顶部状态栏也会显示累计值。
 
+### 先分清两类消耗
+
+| 类别 | 含义 | 进不进 wiki 的统计 |
+|---|---|---|
+| `content` | 编译页面、写笔记等内容产出 | ✅ 计入 |
+| `dev` | 开发/修 wiki 代码本身 | ❌ 不计入 |
+
+导入时用 `--kind` 指定，默认 `content`。`usage` 与站点面板都只统计 `content`，
+开发消耗单列一行、不混进总额。
+
+### 精确统计一段内容产出
+
+会话里往往既有编码又有写页。用 `--checkpoint` 划出起点：
+
+```bash
+"$WIKI_PYTHON" -m wikilib.cli usage --checkpoint    # 开始写页前
+# …写作…
+"$WIKI_PYTHON" -m wikilib.cli usage --kind content  # 只统计这段时间的增量
+```
+
+`--checkpoint` 只记录当前读数、不产生记录，之后的导入按增量计算。
+
 ### 两种数字，不要混着看
 
 | | 来源 | 含义 | 何时有 |
