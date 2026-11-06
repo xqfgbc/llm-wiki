@@ -77,30 +77,71 @@ border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:8px}
 .reds a{display:block;font-size:13px;color:var(--red)}
 #q{width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:6px;
 background:var(--card);color:var(--fg);font-size:13px;margin-bottom:14px}
-#hits{margin-top:6px}#hits a{display:block;padding:4px 0;font-size:13px}
+#q:focus{outline:2px solid var(--accent);outline-offset:1px}
+#hits{display:none;position:fixed;left:16px;top:66px;width:310px;max-height:62vh;
+overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;
+box-shadow:0 10px 30px rgba(0,0,0,.22);z-index:60;padding:6px}
+#hits.on{display:block}
+#hits .cnt{font-size:11.5px;color:var(--muted);padding:4px 8px 6px}
+#hits a{display:block;padding:6px 8px;border-radius:5px;font-size:13.5px;color:var(--fg)}
+#hits a:hover,#hits a.sel{background:rgba(127,127,127,.14)}
+#hits a small{color:var(--muted);font-size:11.5px;margin-left:6px}
+#hits mark{background:rgba(108,182,255,.35);color:inherit;border-radius:2px}
 @media(max-width:1000px){.wrap{grid-template-columns:1fr}
 nav,aside{display:none}main{padding:20px}}
 """
 
-APP_JS = """
+APP_JS = r"""
 const idx=window.__WIKI_INDEX__||{pages:[]};
 const q=document.getElementById('q'),hits=document.getElementById('hits');
+const TYPES={concept:'概念',entity:'实体',topic:'主题',note:'笔记'};
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hl=(t,s)=>esc(t).replace(new RegExp('('+s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>');
+function terms(s){
+  const t=s.toLowerCase().trim(),out=new Set();
+  for(const w of t.split(/\s+/))if(w)out.add(w);
+  if(!out.size)out.add(t);
+  return [...out];
+}
 function score(p,s){
-  const t=s.toLowerCase();let n=0;
-  if(p.title.toLowerCase().includes(t))n+=10;
-  for(const a of(p.aliases||[]))if(a.toLowerCase().includes(t))n+=8;
-  for(const h of(p.headings||[]))if(h.toLowerCase().includes(t))n+=5;
-  if((p.text||'').toLowerCase().includes(t))n+=1;
+  const ts=terms(s);let n=0;
+  for(const t of ts){
+    if(p.title.toLowerCase().includes(t))n+=10;
+    for(const a of(p.aliases||[]))if(a.toLowerCase().includes(t))n+=8;
+    for(const h of(p.headings||[]))if(h.toLowerCase().includes(t))n+=5;
+    if((p.text||'').toLowerCase().includes(t))n+=1;
+  }
   return n;
 }
-q.addEventListener('input',()=>{
-  const s=q.value.trim();if(!s){hits.innerHTML='';return;}
-  const r=idx.pages.map(p=>({p,n:score(p,s)})).filter(x=>x.n>0)
-    .sort((a,b)=>b.n-a.n).slice(0,12);
-  hits.innerHTML=r.map(x=>`<a href="${x.p.slug}.html">${x.p.title}</a>`).join('')
-    ||'<span style="color:var(--muted);font-size:13px">没有匹配</span>';
+let sel=-1,items=[];
+function render(){
+  const s=q.value.trim();
+  if(!s){hits.className='';hits.innerHTML='';items=[];sel=-1;return;}
+  const r=idx.pages.map(p=>({p,n:score(p,s)})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n).slice(0,12);
+  items=r;sel=-1;hits.className='on';
+  if(!r.length){hits.innerHTML='<div class="cnt">没有匹配「'+esc(s)+'」</div>';return;}
+  hits.innerHTML='<div class="cnt">'+r.length+' 条结果 · ↑↓ 选择，回车打开，Esc 关闭</div>'
+    +r.map((x,i)=>`<a href="${x.p.slug}.html" data-i="${i}">${hl(x.p.title,s)}<small>${TYPES[x.p.type]||x.p.type}</small></a>`).join('');
+}
+q.addEventListener('input',render);
+q.addEventListener('focus',()=>{if(q.value.trim())render();});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){q.value='';render();q.blur();return;}
+  if(!items.length)return;
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    sel=(sel+(e.key==='ArrowDown'?1:-1)+items.length)%items.length;
+    [...hits.querySelectorAll('a')].forEach((a,i)=>a.classList.toggle('sel',i===sel));
+  }
+  if(e.key==='Enter'&&sel>=0){location.href=items[sel].p.slug+'.html';}
+});
+document.addEventListener('click',e=>{
+  if(!hits.contains(e.target)&&e.target!==q){hits.className='';}
 });
 """
+
+
+
 
 
 @dataclass
@@ -254,7 +295,6 @@ class Site:
                                  self._top_html()))
         self._write(os.path.join(site_dir, "assets", "style.css"), CSS)
         stats.pruned = self._prune(site_dir)
-        self._write_search_index(site_dir)
         self._write(os.path.join(site_dir, "assets", "app.js"), APP_JS)
         stats.images = len(set(self.images.values()))
         stats.red_links = len(self.red)
@@ -436,8 +476,6 @@ class Site:
             })
         return json.dumps({"v": TEMPLATE_VERSION, "pages": pages}, ensure_ascii=False)
 
-    def _write_search_index(self, site_dir: str) -> None:
-        self._write(os.path.join(site_dir, "search-index.json"), self._search_json())
 
 
 _COMMON_PREFIXES = (
