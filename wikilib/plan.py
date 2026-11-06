@@ -128,11 +128,13 @@ def triage_new(doc_id: str, pages: List[Dict], titles: Dict[str, str],
         page_names = {contracts.norm_name(page["slug"]), contracts.norm_name(page["title"])}
         for a in page.get("aliases", []):
             page_names.add(contracts.norm_name(a))
-        overlap = names & page_names
-        if overlap:
-            doc_title_norm = contracts.norm_name(state.rel_path.rsplit("/", 1)[-1][:-3])
-            if doc_title_norm in page_names or overlap - {contracts.norm_name(doc_id)}:
-                hits.append((page["slug"], sorted(overlap)[:3]))
+        # 用**包含**匹配而不是精确相等：文档名往往比页面标题长得多
+        # （`Human-in-the-loop Agent 设计：…` vs 页面别名 `Human-in-the-Loop`），
+        # 精确相等几乎命中不了，新文档会全部掉进候选池。
+        matched = sorted({d for d in names for pnm in page_names
+                          if len(d) >= 4 and len(pnm) >= 4 and (d in pnm or pnm in d)})
+        if matched:
+            hits.append((page["slug"], matched[:3]))
 
     if hits:
         return [Impact(page=slug, doc_id=doc_id,
