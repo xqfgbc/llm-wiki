@@ -77,6 +77,7 @@ cd "$WIKI_DIR"
 |---|---|
 | `/wiki-update` | 增量更新。无参数 = 同步全部已登记目录；带路径 = 先校验登记再更新 |
 | `/wiki-qa` | 从 wiki 查询内容交给大模型，附原始出处 |
+| `/wiki-html` | 生成并打开 wiki 站点 |
 | `/wiki-note` | 把高价值回答或结论写回（先判断写成正式页还是笔记） |
 | `/llm-wiki` | 底层命令入口（build / lint / html / exclude / usage 等） |
 
