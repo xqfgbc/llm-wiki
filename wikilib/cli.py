@@ -35,8 +35,23 @@ def _collection(cfg: cfgmod.WikiConfig, args):
     return cfg.collection(getattr(args, "collection", None))
 
 
+def _run_all(args, fn) -> int:
+    """不带 --collection 时对全部 collection 依次执行。"""
+    cfg = _cfg(args)
+    if getattr(args, "collection", None) or len(cfg.collections) <= 1:
+        return -1                      # 调用方继续走单 collection 路径
+    rc = 0
+    for c in cfg.collections:
+        args.collection = c.name
+        rc = fn(args) or rc
+    return rc
+
+
 # ------------------------------------------------------------------ normalize
 def cmd_normalize(args) -> int:
+    _rc = _run_all(args, cmd_normalize)
+    if _rc >= 0:
+        return _rc
     cfg = _cfg(args)
     col = _collection(cfg, args)
     ex = exclmod.load(cfg.obsidian.wiki_root)
@@ -88,6 +103,9 @@ def _prepare(cfg, col):
 
 
 def cmd_build(args) -> int:
+    _rc = _run_all(args, cmd_build)
+    if _rc >= 0:
+        return _rc
     cfg = _cfg(args)
     col = _collection(cfg, args)
     report, chunks = _prepare(cfg, col)
@@ -178,6 +196,16 @@ def cmd_query(args) -> int:
     return 0
 
 
+def _emit_inventory(cfg, col, states):
+    """为一个还没有页的 collection 产出页面清单任务。"""
+    order = plan_mod.build_inventory(col.name, col.label, list(states.values()))
+    path = plan_mod.write_orders([order], os.path.join(cfg.orders_dir, col.name))[0]
+    print()
+    print("页面清单任务 → %s" % os.path.relpath(path, cfg.repo_root))
+    print("该 collection 还没有任何 wiki 页，需要先定页面划分。")
+    print("由 Claude 读这份清单，提出页列表并建页，之后 update 才走增量。")
+
+
 # ------------------------------------------------------------------ 内部
 def _page_dicts(pages):
     out = []
@@ -210,6 +238,9 @@ def _status_counts(pages):
 
 # ------------------------------------------------------------------ update
 def cmd_update(args) -> int:
+    _rc = _run_all(args, cmd_update)
+    if _rc >= 0:
+        return _rc
     started = time.time()
     cfg = _cfg(args)
     col = _collection(cfg, args)
@@ -235,6 +266,13 @@ def cmd_update(args) -> int:
             print("建立基线：记录 %d 篇源文档的状态（本次不产出 work order）" % len(current))
             index_md_mod.write_index(cfg.obsidian.wiki_root, col.name, col.label,
                                      pages, _status_counts(pages))
+            if not pages or args.inventory:
+                _emit_inventory(cfg, col, current)
+                return 0
+            return 0
+
+        if args.inventory:
+            _emit_inventory(cfg, col, current)
             return 0
 
 
@@ -348,6 +386,9 @@ def _record_build_usage(cfg, col, page_objs, prev_hashes, report, chunks):
 
 # ------------------------------------------------------------------ stamp
 def cmd_stamp(args) -> int:
+    _rc = _run_all(args, cmd_stamp)
+    if _rc >= 0:
+        return _rc
     """把当前快照的内容 hash 写进页面 frontmatter，作为后续陈旧判据。"""
     import frontmatter
     cfg = _cfg(args)
@@ -641,11 +682,11 @@ def cmd_usage(args) -> int:
 # ------------------------------------------------------------------ html
 def cmd_html(args) -> int:
     cfg = _cfg(args)
-    col = _collection(cfg, args)
-    snap = verify_mod.load_snapshot(os.path.join(cfg.raw_dir, col.name))
-    site = html_mod.Site(cfg, col.name, snap)
+    names = [args.collection] if args.collection else [c.name for c in cfg.collections]
+    site = html_mod.Site(cfg, names)
     stats = site.build()
-    print("站点 %s" % os.path.relpath(cfg.site_dir, cfg.repo_root))
+    print("站点 %s（%d 个 collection）"
+          % (os.path.relpath(cfg.site_dir, cfg.repo_root), len(names)))
     print("页 %d · 新写 %d · 未变跳过 %d · 清理残留 %d · 图片 %d · 未建页 %d"
           % (stats.pages, stats.written, stats.skipped, stats.pruned,
              stats.images, stats.red_links))
@@ -657,6 +698,9 @@ def cmd_html(args) -> int:
 
 # ------------------------------------------------------------------ lint
 def cmd_lint(args) -> int:
+    _rc = _run_all(args, cmd_lint)
+    if _rc >= 0:
+        return _rc
     cfg = _cfg(args)
     col = _collection(cfg, args)
     gl = glossary_mod.load_for(cfg)
@@ -788,6 +832,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             p.add_argument("--open", action="store_true")
         if name in ("update", "stamp"):
             p.add_argument("--force", action="store_true")
+        if name == "update":
+            p.add_argument("--inventory", action="store_true",
+                           help="强制重出页面清单任务")
         if name == "usage":
             p.add_argument("--json", action="store_true")
             p.add_argument("--import-dir", default=None,

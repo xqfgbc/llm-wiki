@@ -23,6 +23,7 @@ from markdown_it import MarkdownIt
 from . import contracts
 from . import usage as usage_mod
 from .pages import deep_link, page_paths
+from .verify import load_snapshot as _load_snap
 
 CITE_RE = re.compile(r"【\[\[([^\[\]#]+)#([^\[\]]+)\]\]】")
 WIKILINK_RE = re.compile(r"\[\[([^\[\]|#]+)(?:#([^\[\]|]+))?(?:\|([^\[\]]*))?\]\]")
@@ -61,6 +62,9 @@ img{max-width:100%;border:1px solid var(--line);border-radius:6px;margin:.6em 0}
 .cite{font-size:12.5px;color:var(--muted);white-space:nowrap}
 .cite:hover{color:var(--accent)}
 .redlink{color:var(--red);border-bottom:1px dotted var(--red)}
+.nav-col{font-size:12px;font-weight:600;color:var(--accent);margin:14px 0 6px;
+padding-top:10px;border-top:1px solid var(--line)}
+.nav-col:first-of-type{border-top:none;padding-top:0;margin-top:0}
 .nav-group{margin-bottom:18px}
 .nav-title{font-size:11.5px;letter-spacing:.08em;color:var(--muted);
 text-transform:uppercase;margin-bottom:6px}
@@ -175,15 +179,27 @@ class RenderStats:
 
 
 class Site:
-    def __init__(self, cfg, collection: str, snap):
+    def __init__(self, cfg, collections=None, snaps=None):
+        """站点是**整站**产物：默认渲染所有 collection。
+
+        早先是单 collection 渲染，多个 collection 会互相覆盖 index.html，
+        最后只剩最后一个。现在统一按整站生成，导航按 collection 分组。
+        """
         self.cfg = cfg
-        self.collection = collection
-        self.snap = snap
+        self.collections = list(collections or [c.name for c in cfg.collections])
         self.md = MarkdownIt("commonmark", {"html": True, "linkify": False})
         self.md.enable("table").enable("strikethrough")
 
-        root = os.path.join(cfg.obsidian.wiki_root, collection)
-        self.pages = [contracts.parse_page(p) for p in page_paths(root)]
+        self.snaps = snaps or {
+            name: _load_snap(os.path.join(cfg.raw_dir, name))
+            for name in self.collections
+        }
+        self.snap = self.snaps[self.collections[0]] if self.snaps else None
+
+        self.pages = []
+        for name in self.collections:
+            root = os.path.join(cfg.obsidian.wiki_root, name)
+            self.pages.extend(contracts.parse_page(p) for p in page_paths(root))
         self.by_name: Dict[str, contracts.Page] = {}
         for p in self.pages:
             self.by_name[contracts.norm_name(p.title)] = p
@@ -197,20 +213,26 @@ class Site:
         self.red: Dict[str, int] = {}
 
     # ------------------------------------------------------------ 引用映射
-    def _build_cite_map(self) -> Tuple[Dict[Tuple[str, str], Dict], Dict[str, str]]:
+    def snap_for(self, page) -> "Snapshot":
+        return self.snaps.get(page.collection) or self.snap
+
+    def _build_cite_map(self) -> Tuple[Dict[Tuple[str, str, str], Dict], Dict[str, str]]:
+        """键带上 collection：不同 collection 可能有同名文档。"""
         cmap, origin = {}, {}
         for page in self.pages:
+            snap = self.snap_for(page)
             for src in page.source_docs():
-                doc_id, _, _ = self.snap.resolve(src.get("doc", ""), "")
+                doc_id, _, _ = snap.resolve(src.get("doc", ""), "")
                 doc_id = doc_id or src.get("doc", "")
-                abs_origin = self.snap.origins.get(doc_id, "")
+                abs_origin = snap.origins.get(doc_id, "")
                 rel = (os.path.relpath(abs_origin, self.cfg.obsidian.vault_root)
                        .replace(os.sep, "/")) if abs_origin else ""
                 origin[doc_id] = rel
                 for c in (src.get("cites") or []):
                     h = str(c.get("heading", ""))
-                    orig = (self.snap.docs.get(doc_id, {}).get(contracts.norm_name(h)) or h)
-                    cmap[(contracts.norm_name(doc_id), contracts.norm_name(h))] = {
+                    orig = (snap.docs.get(doc_id, {}).get(contracts.norm_name(h)) or h)
+                    cmap[(page.collection, contracts.norm_name(doc_id),
+                          contracts.norm_name(h))] = {
                         "doc_id": doc_id, "heading": h, "orig_heading": orig,
                         "origin_path": rel,
                     }
@@ -232,15 +254,17 @@ class Site:
             return ""
         return self.images.get(name, "")
 
-    def _doc_id_of(self, ref: str) -> str:
+    def _doc_id_of(self, ref: str, page=None) -> str:
         """用标题或文件名都能解析到 doc_id —— 页面里两种写法都有。"""
-        doc_id, _, _ = self.snap.resolve(ref, "")
+        snap = self.snap_for(page) if page is not None else self.snap
+        doc_id, _, _ = snap.resolve(ref, "")
         return doc_id or ref
 
-    def _citations_to_md(self, text: str) -> str:
+    def _citations_to_md(self, text: str, page) -> str:
+        col = page.collection
         def repl(m: re.Match) -> str:
             doc, heading = m.group(1).strip(), m.group(2).strip()
-            info = self.cite_map.get((contracts.norm_name(self._doc_id_of(doc)),
+            info = self.cite_map.get((col, contracts.norm_name(self._doc_id_of(doc, page)),
                                       contracts.norm_name(heading)))
             label = "【%s】" % _short_cite(doc, heading)
             full = "%s › %s" % (doc, heading)
@@ -254,7 +278,7 @@ class Site:
                                       full.replace('"', "'"))
         return CITE_RE.sub(repl, text)
 
-    def _wikilinks_to_html(self, text: str) -> str:
+    def _wikilinks_to_html(self, text: str, page) -> str:
         def repl(m: re.Match) -> str:
             target, anchor, alias = m.group(1).strip(), m.group(2), m.group(3)
             label = alias or target
@@ -263,14 +287,15 @@ class Site:
             if page is not None:
                 return '<a href="%s.html">%s</a>' % (page.slug, html_mod.escape(label))
             if anchor:
-                info = self.cite_map.get((contracts.norm_name(self._doc_id_of(target)),
+                info = self.cite_map.get((page.collection,
+                                          contracts.norm_name(self._doc_id_of(target, page)),
                                           contracts.norm_name(anchor)))
                 if info and info["origin_path"]:
                     url = deep_link(self.cfg.obsidian.vault_name, info["origin_path"],
                                     info["orig_heading"])
                     return '<a class="cite" href="%s">%s</a>' % (
                         html_mod.escape(url), html_mod.escape(label))
-            doc_id = self._doc_id_of(target)
+            doc_id = self._doc_id_of(target, page)
             if doc_id and doc_id in self.origin_map:
                 url = deep_link(self.cfg.obsidian.vault_name, self.origin_map[doc_id])
                 return '<a href="%s">%s</a>' % (html_mod.escape(url),
@@ -281,8 +306,8 @@ class Site:
 
     def render_body(self, page: contracts.Page, site_dir: str) -> str:
         text = self._images_to_html(page.body, page, site_dir)
-        text = self._citations_to_md(text)
-        text = self._wikilinks_to_html(text)
+        text = self._citations_to_md(text, page)
+        text = self._wikilinks_to_html(text, page)
         rendered = self.md.render(text)
         # Markdown 链接带不上 class，渲染后统一给「引用」和「源文档」标注样式
         rendered = re.sub(r'<a href="(obsidian://[^"]*)">(【[^<]*】)</a>',
@@ -350,7 +375,8 @@ class Site:
                 self.images[name] = "assets/img/" + target
 
     def _find_image_source(self, name: str) -> Optional[str]:
-        for root in [os.path.dirname(p) for p in self.snap.origins.values()]:
+        for root in [os.path.dirname(p) for snap in self.snaps.values()
+                     for p in snap.origins.values()]:
             cand = os.path.join(root, name)
             if os.path.exists(cand):
                 return cand
@@ -358,7 +384,8 @@ class Site:
         digits = re.search(r"\d{8,}", name)
         if not digits:
             return None
-        for root in [os.path.dirname(p) for p in self.snap.origins.values()]:
+        for root in [os.path.dirname(p) for snap in self.snaps.values()
+                     for p in snap.origins.values()]:
             for f in os.listdir(root):
                 if digits.group(0) in f and f.lower().endswith((".png", ".jpg", ".jpeg")):
                     return os.path.join(root, f)
@@ -391,29 +418,40 @@ class Site:
                 '<span>争议 %d</span><span>未建页 %d</span>%s'
                 '<span>%s</span></div>'
                 % (len(self.pages), stale, disputed, len(self.red), tok,
-                   self.collection))
+                   "%d 个 collection" % len(self.collections)))
 
     def _nav_html(self, current: Optional[str]) -> str:
-        groups: Dict[str, List[contracts.Page]] = {}
-        for p in self.pages:
-            groups.setdefault(p.type or "other", []).append(p)
+        """导航按 collection 分组，组内再按类型分。"""
         labels = {"concept": "概念", "entity": "实体", "topic": "主题", "note": "笔记"}
+        col_labels = {c.name: c.label for c in self.cfg.collections}
+        by_col: Dict[str, Dict[str, List[contracts.Page]]] = {}
+        for p in self.pages:
+            by_col.setdefault(p.collection, {}).setdefault(p.type or "other", []).append(p)
+
         out = ['<input class="qbox" placeholder="搜索…" autocomplete="off">']
-        for typ in ("concept", "entity", "topic", "note"):
-            if typ not in groups:
+        multi = len(by_col) > 1
+        for col in self.collections:
+            groups = by_col.get(col)
+            if not groups:
                 continue
-            out.append('<div class="nav-group"><div class="nav-title">%s</div>'
-                       % labels.get(typ, typ))
-            for p in sorted(groups[typ], key=lambda x: x.title):
-                cls = ' class="on"' if current == p.slug else ""
-                badge = ""
-                if p.status == "stale":
-                    badge = '<span class="badge">陈旧</span>'
-                elif p.status == "disputed":
-                    badge = '<span class="badge">争议</span>'
-                out.append('<a%s href="%s.html">%s%s</a>'
-                           % (cls, p.slug, html_mod.escape(p.title), badge))
-            out.append("</div>")
+            if multi:
+                out.append('<div class="nav-col">%s</div>'
+                           % html_mod.escape(col_labels.get(col, col)))
+            for typ in ("concept", "entity", "topic", "note"):
+                if typ not in groups:
+                    continue
+                out.append('<div class="nav-group"><div class="nav-title">%s</div>'
+                           % labels.get(typ, typ))
+                for p in sorted(groups[typ], key=lambda x: x.title):
+                    cls = ' class="on"' if current == p.slug else ""
+                    badge = ""
+                    if p.status == "stale":
+                        badge = '<span class="badge">陈旧</span>'
+                    elif p.status == "disputed":
+                        badge = '<span class="badge">争议</span>'
+                    out.append('<a%s href="%s.html">%s%s</a>'
+                               % (cls, p.slug, html_mod.escape(p.title), badge))
+                out.append("</div>")
         return "".join(out)
 
     def _aside_html(self, page: contracts.Page) -> str:
@@ -433,8 +471,9 @@ class Site:
 
         parts.append('<div class="nav-title" style="margin-top:20px">来源与引用</div>')
         parts.append('<div class="src">')
+        snap = self.snap_for(page)
         for src in page.source_docs():
-            doc_id, _, _ = self.snap.resolve(src.get("doc", ""), "")
+            doc_id, _, _ = snap.resolve(src.get("doc", ""), "")
             rel = self.origin_map.get(doc_id or "", "")
             title = doc_id or src.get("doc", "")
             if rel:
@@ -445,7 +484,8 @@ class Site:
                 parts.append('<div style="font-size:13px">%s</div>' % html_mod.escape(title))
             for c in (src.get("cites") or []):
                 h = str(c.get("heading", ""))
-                info = self.cite_map.get((contracts.norm_name(doc_id),
+                info = self.cite_map.get((page.collection,
+                                          contracts.norm_name(doc_id),
                                           contracts.norm_name(h)))
                 if info and info["origin_path"]:
                     parts.append('<a style="padding-left:12px;font-size:12px"'
@@ -466,21 +506,25 @@ class Site:
                 + "</div>")
 
     def _home_html(self) -> str:
+        col_labels = {c.name: c.label for c in self.cfg.collections}
         rows = []
-        for typ, label in (("concept", "概念"), ("entity", "实体"), ("topic", "主题")):
-            items = [p for p in self.pages if p.type == typ]
+        for col in self.collections:
+            items = [p for p in self.pages if p.collection == col]
             if not items:
                 continue
-            rows.append("<h2>%s（%d）</h2><ul>" % (label, len(items)))
-            for p in sorted(items, key=lambda x: x.title):
-                rows.append('<li><a href="%s.html">%s</a> — %s</li>'
-                            % (p.slug, html_mod.escape(p.title),
-                               html_mod.escape(_one_liner(p))))
-            rows.append("</ul>")
-        label = next((c.label for c in self.cfg.collections
-                      if c.name == self.collection), self.collection)
-        return ('<h1>%s</h1>%s%s'
-                % (html_mod.escape(label), "".join(rows), self._usage_html()))
+            rows.append("<h1>%s</h1>" % html_mod.escape(col_labels.get(col, col)))
+            for typ, label in (("concept", "概念"), ("entity", "实体"),
+                               ("topic", "主题"), ("note", "笔记")):
+                group = [p for p in items if p.type == typ]
+                if not group:
+                    continue
+                rows.append("<h2>%s（%d）</h2><ul>" % (label, len(group)))
+                for p in sorted(group, key=lambda x: x.title):
+                    rows.append('<li><a href="%s.html">%s</a> — %s</li>'
+                                % (p.slug, html_mod.escape(p.title),
+                                   html_mod.escape(_one_liner(p))))
+                rows.append("</ul>")
+        return ("".join(rows) + self._usage_html())
 
     def _usage_html(self) -> str:
         if not self.usage_records:

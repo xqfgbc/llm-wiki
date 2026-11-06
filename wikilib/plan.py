@@ -186,3 +186,34 @@ def write_orders(orders: List[Dict], out_dir: str) -> List[str]:
 
 def file_hash(path: str) -> str:
     return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+
+def build_inventory(collection: str, label: str, docs: List[SourceState]) -> Dict:
+    """新 collection 的「页面清单」任务。
+
+    增量流程只能重编**已有页**，所以一个还没有页的 collection 永远拿不到
+    第一批页。这里产出一份盘点任务：列出所有源文档与标题，让 LLM 提出页面划分。
+    """
+    return {
+        "version": 1,
+        "slug": "_inventory",
+        "mode": "inventory",
+        "collection": collection,
+        "label": label,
+        "docs": [{
+            "doc_id": d.doc_id,
+            "rel_path": d.rel_path,
+            "headings": [{"level": h.get("level", 2), "text": h.get("norm", "")}
+                         for h in d.headings],
+        } for d in docs],
+        "contract": {
+            "task": "为新 collection 提出页面清单",
+            "rules": [
+                "页面分三类：concept（机制/原则）、entity（可指称的具体对象）、topic（跨页综述）",
+                "一个页面至少要有 2 篇来源文档支撑；只有 1 篇支撑的概念不要单独建页，并入父级",
+                "单篇文档不必对应单页；先看主题，再看文档",
+                "每页给出：slug、title、type、预计来源（doc_id + 小节标题）",
+                "输出一个 JSON 数组，不要写页面正文",
+            ],
+        },
+    }
