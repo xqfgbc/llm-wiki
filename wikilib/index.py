@@ -148,18 +148,21 @@ def index_pages(conn: sqlite3.Connection, collection: str,
              json.dumps(page.get("cites", []), ensure_ascii=False),
              page.get("body", ""), now))
 
+        # 别名也要进索引：`Confused Deputy` 这类英文别名只存在 frontmatter 里，
+        # 不进 FTS 的话，用别名搜不到对应页。
+        alias_text = " ".join(page.get("aliases") or [])
         for seq, (heading, text) in enumerate(_split_page(page.get("body", ""))):
+            path_text = "%s > %s" % (page["title"], heading)
+            idx_path = "%s > %s > %s" % (page["title"], alias_text, heading)
             conn.execute(
                 "INSERT INTO slides(slide_id,doc_id,seq,heading,heading_orig,heading_path,"
                 "body,chars,chunk_hash,level) VALUES(?,?,?,?,?,?,?,?,NULL,2)",
-                (next_id, doc_id, seq, heading, heading, "%s > %s" % (page["title"], heading),
-                 text, len(text)))
+                (next_id, doc_id, seq, heading, heading, path_text, text, len(text)))
             conn.execute(
                 "INSERT INTO slides_fts(rowid,doc_id,slide_id,heading,heading_path,body)"
                 " VALUES(?,?,?,?,?,?)",
                 (next_id, doc_id, next_id, to_index_text(heading),
-                 to_index_text("%s > %s" % (page["title"], heading)),
-                 to_index_text(text)))
+                 to_index_text(idx_path), to_index_text(text)))
             next_id += 1
             n += 1
 

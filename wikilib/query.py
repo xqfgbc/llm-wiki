@@ -14,6 +14,7 @@ from .index import BM25_WEIGHTS
 from .tokenize import build_match_expr, query_terms
 
 RELEVANCE_FLOOR = 0.30
+WEAK_PENALTY = 0.45      # 弱相关页的名次惩罚系数
 
 SYNTHESIS_CUES = (
     "对比", "区别", "总结", "综述", "全景", "关系", "为什么", "怎么落地",
@@ -87,21 +88,30 @@ def search_pages(conn, query: str, top_k: int = 3,
     grouped = _group(rows)
     if not grouped:
         return []
+
+    # 先算弱相关，再按「弱相关降权后」的分数排序。
+    # 不降权的话，正文里恰好出现查询词的页会排到真正对口的页前面
+    # （实测：「Agent 身份怎么设计」把弱相关的「凭证代理模式」排在
+    #   直接对口的「Agent 身份与权限模型」之前）。
+    for item in grouped:
+        r = item["row"]
+        anchor = " ".join([r["title"] or ""] + _aliases_of(r) +
+                          [h["heading"] or "" for h in item["hits"]]).lower()
+        item["weak"] = not any(t and t.lower() in anchor for t in terms)
+        item["rank"] = item["score"] * (WEAK_PENALTY if item["weak"] else 1.0)
+    grouped.sort(key=lambda x: -x["rank"])
+
     # 相对下限：只有最佳分数的一定比例以内的页才算「相关」。
-    # 没有这个下限时，一个语料里根本没有对应概念的问题（例如尚无页面的
-    # confused deputy）也会拉回两三个弱相关页，反而污染上下文。
-    floor = grouped[0]["score"] * RELEVANCE_FLOOR
+    # 没有这个下限时，语料里根本没有对应概念的问题也会拉回两个弱相关页。
+    floor = grouped[0]["rank"] * RELEVANCE_FLOOR
     pages = []
-    for item in [g for g in grouped if g["score"] >= floor][:top_k]:
+    for item in [g for g in grouped if g["rank"] >= floor][:top_k]:
         r = item["row"]
         try:
             cites = json.loads(r["cites_json"] or "[]")
         except json.JSONDecodeError:
             cites = []
-        anchor_text = " ".join([r["title"] or ""] + _aliases_of(r) +
-                               [h["heading"] or "" for h in item["hits"]])
-        anchor_norm = anchor_text.lower()
-        weak = not any(t and t.lower() in anchor_norm for t in terms)
+        weak = item["weak"]
 
         pages.append({
             "page": r["rel_path"],

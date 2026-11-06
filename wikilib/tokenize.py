@@ -23,7 +23,7 @@ jieba.setLogLevel(logging.ERROR)
 _ASCII_WORD = re.compile(r"[A-Za-z][A-Za-z0-9\-/&\._]*")
 _CJK = re.compile(r"[一-鿿]")
 _PUNCT_ONLY = re.compile(r"^[\W_]+$", re.UNICODE)
-WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
+WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]*)?\]\]")
 
 
 def _keep(token: str) -> bool:
@@ -36,8 +36,14 @@ def _keep(token: str) -> bool:
 
 
 def strip_wikilinks(text: str) -> str:
-    """`[[文档#标题]]` → `文档`。锚点文本进索引会污染标题词的权重。"""
-    return WIKILINK.sub(r"\1", text or "")
+    """`[[文档#标题]]` → `文档 标题`。
+
+    ⚠️ 锚点必须保留：小节标题往往正是读者会用来检索的那个术语
+    （`[[Security Best Practices#Confused Deputy Problem]]` 里的
+    「Confused Deputy Problem」）。早先只保留文档名，导致页面里明明写着
+    「混淆代理」，却搜不到。
+    """
+    return WIKILINK.sub(lambda m: " ".join(g for g in m.groups() if g), text or "")
 
 
 def tokens(text: str) -> List[str]:
