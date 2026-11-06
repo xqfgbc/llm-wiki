@@ -37,19 +37,35 @@ DIGITS_RE = re.compile(r"\d{8,}")
 # 粘连的可疑断点。取**最早**的一个，而不是按规则优先级——
 # 否则 `New Attack SurfaceThe STS … in a database. Default …` 会切在句号处，
 # 标题变成一整句，比不修还糟。
+# 断点规则带上名字：不同规则对「溢出部分」的形态要求不同，
+# 用同一把尺子会误伤（见下面 camel 的说明）。
 CANDIDATES = (
-    re.compile(r"[。！？；]"),
-    re.compile(r"\.\s+(?=[A-Z一-鿿])"),
-    re.compile(r"[”\"』」](?=[A-Z一-鿿])"),
-    re.compile(r"\)(?=[A-Za-z一-鿿])"),
-    re.compile(r"[a-z](?=[A-Z])"),
-    re.compile(r"[一-鿿](?=[A-Z]{2,})"),
-    # `CB4A- The MCP…`：连字符紧贴字母且后面跟空格。
-    # 前一个字符必须不是空格，才不会误伤 `Mode 3 — Broker-gated …` 这种正经破折号。
-    re.compile(r"(?<=[A-Za-z0-9])[-–—](?=\s)"),
+    ("punct", re.compile(r"[。！？；]")),
+    ("quote", re.compile(r"[”\"』」](?=[A-Z一-鿿])")),
+    ("paren", re.compile(r"\)(?=[A-Za-z一-鿿])")),
+    ("camel", re.compile(r"[a-z](?=[A-Z])")),
+    ("cjk_en", re.compile(r"[一-鿿](?=[A-Z]{2,})")),
+    ("dash", re.compile(r"(?<=[A-Za-z0-9])[-–—](?=\s)")),
 )
+# camel 断点的两道门槛，用来把「真粘连」和「专名」分开：
+#   1. 溢出必须以大写开头的正常单词起头（排除 SaaS → `Saa|S`）
+#   2. 溢出里必须出现小写开头的词——真句子会有，标题式大写短语不会有
+#      （排除 `ServiceNow Reference Architecture` → `Service|Now Reference…`）
+CAMEL_SPILL = re.compile(r"^[A-Z][a-z]{2,}\b")
+LOWER_WORD = re.compile(r"\b[a-z]{2,}\b")
 
-MIN_TITLE, MAX_TITLE = 2, 60
+
+def _camel_ok(spill: str) -> bool:
+    spill = spill.strip()
+    if not CAMEL_SPILL.match(spill):
+        return False
+    first = spill.split(" ", 1)[0]
+    rest = spill[len(first):]
+    return bool(LOWER_WORD.search(rest))
+
+MIN_TITLE, MAX_TITLE = 4, 60
+# 切出来的「标题」不能只是编号或单个字母（`A.` / `01.` / `iv.`）
+ENUM_ONLY = re.compile(r"^\s*(?:[A-Za-z]|[IVXivx]{1,4}|\d{1,3})\s*[.)、]?\s*$")
 
 
 @dataclass
@@ -113,10 +129,15 @@ def strip_heading_markup(text: str) -> str:
 def _split_points(text: str) -> List[int]:
     """所有可疑断点（每个都是「标题结束」的位置）。"""
     pts = set()
-    for pat in CANDIDATES:
+    for name, pat in CANDIDATES:
         for m in pat.finditer(text):
-            pts.add(m.end())
-    return sorted(p for p in pts if p >= MIN_TITLE and p < len(text))
+            pos = m.end()
+            if pos < MIN_TITLE or pos >= len(text):
+                continue
+            if name == "camel" and not _camel_ok(text[pos:]):
+                continue
+            pts.add(pos)
+    return sorted(pts)
 
 
 def repair_heading(text: str, max_len: int, min_spill: int) -> Tuple[str, str, str]:
@@ -135,6 +156,8 @@ def repair_heading(text: str, max_len: int, min_spill: int) -> Tuple[str, str, s
     for pos in points:
         title, spill = text[:pos].strip(), text[pos:].strip()
         if not (MIN_TITLE <= len(title) <= MAX_TITLE):
+            continue
+        if ENUM_ONLY.match(title):
             continue
         if len(spill) < min_spill:
             continue
@@ -219,6 +242,14 @@ def normalize_document(path: str, rel_path: str, collection: str,
     title = str(meta.get("title") or "").strip()
     source_url = str(meta.get("source") or "").strip()
 
+    # 标题粘连是**网页剪藏**的产物：剪藏器把标题和正文首句挤进了同一行。
+    # PPT 派生的文档、手写笔记不会这样，强行修复只会误伤
+    # （实测在知识库文档上把 `ServiceNow …` 切成 `Service`、把
+    #   `AI Leadership & Op. Model …` 切成 `AI Leadership & Op.`）。
+    tags = meta.get("tags") or []
+    tags = [str(x).lower() for x in (tags if isinstance(tags, list) else [tags])]
+    is_clipping = "clippings" in tags or source_url.lower().startswith("http")
+
     lines = body.split("\n")
     lines, _ = _drop_leading_boilerplate(lines)
 
@@ -268,8 +299,11 @@ def normalize_document(path: str, rel_path: str, collection: str,
             i += 1
             continue
 
-        # N1 断行修复
-        fixed, spill, confidence = repair_heading(clean, max_len, min_spill)
+        # N1 断行修复：只对网页剪藏生效
+        if is_clipping:
+            fixed, spill, confidence = repair_heading(clean, max_len, min_spill)
+        else:
+            fixed, spill, confidence = clean, "", "none"
         repaired = confidence == "high" and fixed != clean
         if confidence == "low":
             low_conf.append((clean, "无法自动断行，需人工判断"))
@@ -320,18 +354,48 @@ class ScanReport:
     warnings: List[str] = field(default_factory=list)
 
 
+def _skip_roots(cfg: cfgmod.WikiConfig, collection: cfgmod.CollectionConfig):
+    """扫描时要跳过的子树。
+
+    1. wiki 根：那是派生物，不能当事实来源。vault 根已经在校验阶段被拒，
+       这里再挡一次是为了防止手改配置把 wiki_root 放进某个源目录里。
+    2. 其它 collection 已登记的源：更具体的登记优先，避免同一份文档被两个
+       collection 各索引一次（例如同时登记了 obsidian/笔记 与 obsidian/笔记/云架构）。
+    """
+    skip = [os.path.realpath(cfg.obsidian.wiki_root)]
+    for other in cfg.collections:
+        if other.name == collection.name:
+            continue
+        skip.extend(os.path.realpath(s) for s in other.sources)
+    return skip
+
+
+def _under(path: str, roots) -> bool:
+    real = os.path.realpath(path)
+    for r in roots:
+        if real == r or real.startswith(r + os.sep):
+            return True
+    return False
+
+
 def scan_collection(collection: cfgmod.CollectionConfig, cfg: cfgmod.WikiConfig,
                     ex: exclmod.Exclusions) -> ScanReport:
     report = ScanReport()
     seen: Dict[str, str] = {}
+    skip_roots = _skip_roots(cfg, collection)
 
     for root in collection.sources:
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            dirnames[:] = sorted(
+                d for d in dirnames
+                if not d.startswith(".")
+                and not _under(os.path.join(dirpath, d), skip_roots))
             for name in sorted(filenames):
                 if not name.endswith(".md"):
                     continue
                 abs_path = os.path.join(dirpath, name)
+                if _under(abs_path, skip_roots):
+                    continue
                 rel = os.path.relpath(abs_path, root).replace(os.sep, "/")
 
                 rule = ex.match_file(collection.name, rel)
