@@ -343,10 +343,14 @@ def normalize_document(path: str, rel_path: str, collection: str,
         else:
             out.append("%s %s" % ("#" * level, clean))
 
-        headings.append(HeadingRec(level=level, orig=orig_text, norm=fixed,
-                                   line=i + 1, repaired=repaired,
-                                   confidence=confidence,
-                                   synthetic=orig_text == ""))
+        # 整篇提升过的那批标题，原文里都没有对应锚点。
+        # 早先写成 `synthetic = (orig_text == "")`，但 orig_text 永远非空，
+        # 导致锚点仍然指向不存在的位置（测试抓到的）。
+        headings.append(HeadingRec(
+            level=level,
+            orig="" if promoted else orig_text,
+            norm=fixed, line=i + 1, repaired=repaired,
+            confidence=confidence, synthetic=bool(promoted)))
         i += 1
 
     body = "\n".join(out)
