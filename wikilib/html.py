@@ -328,7 +328,7 @@ class Site:
             body = self.render_body(page, site_dir)
             aside = self._aside_html(page)
             doc_html = self._layout(page.title, nav, body, aside,
-                                    self._top_html())
+                                    self._top_html())   # 用量只在首页出现
             if self._write_if_changed(os.path.join(site_dir, page.slug + ".html"),
                                       doc_html):
                 stats.written += 1
@@ -338,7 +338,7 @@ class Site:
         self._write(os.path.join(site_dir, "index.html"),
                     self._layout("Agent 安全 Wiki", self._nav_html("index"),
                                  self._home_html(), self._reds_html(),
-                                 self._top_html()))
+                                 self._top_html(with_usage=True)))
         self._write(os.path.join(site_dir, "assets", "style.css"), CSS)
         stats.pruned = self._prune(site_dir)
         self._write_search_index(site_dir)
@@ -405,11 +405,11 @@ class Site:
             f.write(content)
 
     # ------------------------------------------------------------ 片段
-    def _top_html(self) -> str:
+    def _top_html(self, with_usage: bool = False) -> str:
         stale = sum(1 for p in self.pages if p.status == "stale")
         disputed = sum(1 for p in self.pages if p.status == "disputed")
         tok = ''
-        if self.usage_records:
+        if with_usage and self.usage_records:
             u = usage_mod.summary(self.usage_records, kind=usage_mod.KIND_CONTENT)
             if u["est_total"]:
                 tok = '<span>累计 ≈ %s tokens</span>' % format(u["est_total"], ",")
