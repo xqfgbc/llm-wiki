@@ -80,7 +80,7 @@ ls "$WIKI_DIR/data/site"/*.html
 ## 注意事项
 
 - 站点在 `data/site/`，是派生物，删掉重跑即可
-- 内容是**离线**可用的：不依赖 CDN、不需要后端；搜索走内联索引
+- 内容是**离线**可用的：不依赖 CDN、不需要后端；搜索走独立的 assets/search-index.js
 - 如果页面里 `lint` 报红链，站点上对应链接就是红色——那是知识缺口，不是渲染错误
 - 引用点开后跳 Obsidian；图片按内容哈希复制，同名不同图不会串
 - 打不开或样式错乱时，先确认 `data/site/assets/style.css` 与 `app.js` 是否存在
