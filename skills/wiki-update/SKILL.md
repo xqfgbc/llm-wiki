@@ -86,7 +86,7 @@ order 的 `mode` 为 `new` 时是候选新页，没有既有内容。
 
 > 想精确统计这次编译消耗的 token，在 Step 3 之前先跑
 > `"$WIKI_PYTHON" -m wikilib.cli usage --checkpoint`，
-> 收尾后再 `usage --kind content`。开发 wiki 本身的消耗用 `--kind dev` 导入，
+> 收尾后再 `usage --import --kind content`。开发 wiki 本身的消耗用 `--kind dev` 导入，
 > 不要混进内容成本。
 
 

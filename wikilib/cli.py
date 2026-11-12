@@ -706,7 +706,7 @@ def _latest_project_dir():
 
 def cmd_usage(args) -> int:
     cfg = _cfg(args)
-    if args.import_dir or args.session:
+    if args.import_dir or args.session or args.import_now:
         project_dir = os.path.expanduser(args.import_dir) if args.import_dir \
             else _latest_project_dir()
         if not project_dir:
@@ -939,6 +939,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             p.add_argument("--kind", default="content",
                            choices=["content", "dev"],
                            help="content=产出 wiki 内容；dev=开发 wiki 本身")
+            p.add_argument("--import", dest="import_now", action="store_true",
+                           help="导入当前会话的增量（自动定位最近的会话记录）")
             p.add_argument("--checkpoint", action="store_true",
                            help="只记录当前读数，不统计（用于划出内容产出的起点）")
         p.set_defaults(func={"normalize": cmd_normalize, "build": cmd_build,
