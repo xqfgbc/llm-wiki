@@ -168,6 +168,8 @@ def repair_heading(text: str, max_len: int, min_spill: int) -> Tuple[str, str, s
 
 # ------------------------------------------------------------------ 噪音
 BOLD_LINE = re.compile(r"^\s*\*\*([^*]{4,40})\*\*\s*$")
+# 中文文章常见的分节写法：`一、无状态假设的三条前提`
+CN_SECTION = re.compile(r"^\s*[一二三四五六七八九十]{1,3}、[^。，；！？]{2,28}$")
 
 
 def _promote_bold_headings(lines: List[str]):
@@ -181,6 +183,10 @@ def _promote_bold_headings(lines: List[str]):
         m = BOLD_LINE.match(line)
         if m and not m.group(1).strip().endswith(("：", ":", "，", ",", "、", "。", "…")):
             out.append("## " + m.group(1).strip())
+            n += 1
+        elif CN_SECTION.match(line):
+            # 中文分节标题（`一、…`）在剪藏里常常只是普通行，同样提升
+            out.append("## " + line.strip())
             n += 1
         else:
             out.append(line)
@@ -363,6 +369,15 @@ def normalize_document(path: str, rel_path: str, collection: str,
     if not title:
         h1s = [h.norm for h in headings if h.level == 1 and h.norm]
         title = h1s[0] if len(h1s) == 1 else doc_id
+
+    # 文首没有标题归属的正文，切片时会挂在文档标题下。标题必须进映射表，
+    # 否则「引用文档标题」解析不到（无标题的剪藏整篇都属这种情况）。
+    if not any(h.norm == title for h in headings):
+        first_line = min((h.line for h in headings), default=len(lines) + 1)
+        preamble = any(l.strip() for l in lines[:max(first_line - 1, 0)])
+        if not headings or preamble:
+            headings.insert(0, HeadingRec(level=1, orig="", norm=title,
+                                          line=0, synthetic=True))
 
     doc = NormalizedDoc(
         doc_id=doc_id,

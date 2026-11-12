@@ -160,8 +160,11 @@ class TestNormalize(Base):
         self.assertNotIn("主要内容包括以下几个部分：", norms)
         self.assertTrue(all(h.synthetic for h in by_id["nohead"].headings))
 
-        self.assertFalse([h for h in by_id["clip"].headings if h.synthetic],
-                         "已有标题的文档不应触发提升")
+        # 只有「文档标题」这一条隐式标题允许是 synthetic；
+        # 有标题的文档不应把加粗行也提升成小节。
+        extra = [h for h in by_id["clip"].headings
+                 if h.synthetic and h.norm != by_id["clip"].title]
+        self.assertFalse(extra, "已有标题的文档不应触发加粗行提升")
 
     def test_exclusions_apply(self):
         self.write("skip.md", PLAIN)
@@ -196,6 +199,38 @@ class TestTitleFallback(Base):
         rep = normalize.scan_collection(self.cfg.collections[0], self.cfg, ex)
         self.assertEqual(rep.docs[0].title, "fenced",
                          "代码块里的 # 不是标题")
+
+
+class TestChineseSectionHeadings(Base):
+    def test_cn_numbered_lines_promoted(self):
+        self.write("cn.md", """---
+title: 中文长文
+source: https://example.com/cn
+tags: [clippings]
+---
+一、无状态假设的三条前提
+
+正文一。
+
+二、Agent 的状态清单
+
+正文二。
+""")
+        ex = exclusions.load(self.wiki)
+        rep = normalize.scan_collection(self.cfg.collections[0], self.cfg, ex)
+        norms = [h.norm for h in rep.docs[0].headings]
+        self.assertIn("一、无状态假设的三条前提", norms)
+        self.assertIn("二、Agent 的状态清单", norms)
+
+
+class TestTitleAsHeading(Base):
+    def test_headless_doc_title_is_citable(self):
+        """没有小节的文档，文档标题要能作为引用锚点解析。"""
+        self.write("noh.md", NOHEAD)
+        ex = exclusions.load(self.wiki)
+        rep = normalize.scan_collection(self.cfg.collections[0], self.cfg, ex)
+        heads = {h.norm for h in rep.docs[0].headings}
+        self.assertIn(rep.docs[0].title, heads)
 
 
 class TestChunk(Base):
