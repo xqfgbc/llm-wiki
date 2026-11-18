@@ -1,0 +1,638 @@
+<title>Wiki 人审工作台</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Design plan
+     Color: cool slate neutrals + teal action + semantic green/red/amber/blue.
+     Type: IBM Plex Sans for UI, IBM Plex Mono for ids and evidence.
+     Layout: sticky summary + filter bar, single-column review cards, export dock. */
+  :root {
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --surface-2: #edf1f5;
+    --fg: #141b24;
+    --muted: #5b6776;
+    --line: #d7dee7;
+    --accent: #0f766e;
+    --accent-weak: #d8f1ed;
+    --on-accent: #ffffff;
+    --accept: #166534;
+    --accept-bg: #dcfce7;
+    --reject: #b91c1c;
+    --reject-bg: #fee2e2;
+    --defer: #a16207;
+    --defer-bg: #fef3c7;
+    --merge: #1d4ed8;
+    --merge-bg: #dbeafe;
+    --shadow: 0 1px 2px rgba(20, 27, 36, .06), 0 8px 24px rgba(20, 27, 36, .04);
+    --radius: 12px;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-2: #1e252e;
+      --fg: #e6edf3;
+      --muted: #9aa7b5;
+      --line: #2b3440;
+      --accent: #5eead4;
+      --accent-weak: #123c38;
+      --on-accent: #062925;
+      --accept: #86efac;
+      --accept-bg: #12351f;
+      --reject: #fca5a5;
+      --reject-bg: #3b1717;
+      --defer: #fcd34d;
+      --defer-bg: #3a2b0a;
+      --merge: #93c5fd;
+      --merge-bg: #14284a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-2: #1e252e;
+    --fg: #e6edf3;
+    --muted: #9aa7b5;
+    --line: #2b3440;
+    --accent: #5eead4;
+    --accent-weak: #123c38;
+    --on-accent: #062925;
+    --accept: #86efac;
+    --accept-bg: #12351f;
+    --reject: #fca5a5;
+    --reject-bg: #3b1717;
+    --defer: #fcd34d;
+    --defer-bg: #3a2b0a;
+    --merge: #93c5fd;
+    --merge-bg: #14284a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.55;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 96px;
+  }
+  .topbar {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 20;
+    margin-inline: calc(-1 * max(16px, env(safe-area-inset-left, 0px))) calc(-1 * max(16px, env(safe-area-inset-right, 0px)));
+    padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar-inner, .wrap { max-width: 1080px; margin: 0 auto; }
+  .topbar-inner { padding-block: 14px 12px; display: grid; gap: 10px; }
+  .title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 20px; line-height: 1.2; letter-spacing: -.01em; text-wrap: balance; }
+  .subtitle { color: var(--muted); font-size: 12.5px; }
+  .summary { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+  .summary b { color: var(--fg); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .filters { display: grid; grid-template-columns: 1.1fr 1.4fr 1fr 1.6fr; gap: 8px; }
+  @media (max-width: 720px) { .filters { grid-template-columns: 1fr 1fr; } }
+  select, input[type="text"], textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--fg);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font: inherit;
+  }
+  select:focus-visible, input:focus-visible, textarea:focus-visible, button:focus-visible, input[type="radio"]:focus-visible, input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  main { max-width: 1080px; margin: 0 auto; padding-top: 16px; display: grid; gap: 12px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 14px 16px 16px;
+    display: grid;
+    gap: 10px;
+  }
+  .card[data-action="accept_new"] { border-left-color: var(--accept); }
+  .card[data-action="merge_into"], .card[data-action="alias_only"] { border-left-color: var(--merge); }
+  .card[data-action="reject"] { border-left-color: var(--reject); }
+  .card[data-action="defer"] { border-left-color: var(--defer); }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .card-head h2 { margin: 0; font-size: 16px; line-height: 1.25; letter-spacing: -.005em; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    border-radius: 999px; padding: 2px 8px; font-size: 11.5px; font-weight: 600;
+    white-space: nowrap; border: 1px solid transparent;
+  }
+  .chip.reason { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
+  .chip.conf { background: var(--accent-weak); color: var(--accent); }
+  .proposal { font-size: 13px; color: var(--muted); }
+  .proposal code, .ev code, .obj code { font-family: var(--mono); font-size: 12px; }
+  .proposal b { color: var(--fg); }
+  .evidence, .objections { border-top: 1px dashed var(--line); padding-top: 8px; }
+  .ev { margin: 0 0 6px; color: var(--muted); font-size: 12.5px; }
+  .ev .src { color: var(--fg); font-family: var(--mono); font-size: 11.5px; }
+  .ev .quote { display: block; margin-top: 2px; }
+  details.objections summary { cursor: pointer; color: var(--fg); font-size: 12.5px; font-weight: 600; }
+  .obj { margin: 8px 0 0; padding-left: 10px; border-left: 2px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  .obj .rule { font-family: var(--mono); font-size: 11.5px; color: var(--fg); }
+  .obj .fix { color: var(--accent); }
+  .controls { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .actions label {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px;
+    cursor: pointer; font-size: 12.5px; color: var(--muted); background: var(--surface);
+  }
+  .actions label:has(input:checked) { color: var(--fg); border-color: currentColor; background: var(--surface-2); }
+  .actions label[data-for="accept_new"]:has(input:checked) { color: var(--accept); }
+  .actions label[data-for="merge_into"]:has(input:checked), .actions label[data-for="alias_only"]:has(input:checked) { color: var(--merge); }
+  .actions label[data-for="reject"]:has(input:checked) { color: var(--reject); }
+  .actions label[data-for="defer"]:has(input:checked) { color: var(--defer); }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+  .field { display: grid; gap: 3px; min-width: 0; }
+  .field span { font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+  .hide { display: none !important; }
+  .note-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+  .note-row textarea { flex: 1 1 320px; min-height: 38px; resize: vertical; }
+  .reviewed { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; padding-top: 7px; }
+  .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+    border-radius: 8px; padding: 7px 11px; font: inherit; font-size: 12.5px; cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  button.accent { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  button.ghost { background: transparent; }
+  button:hover { border-color: var(--accent); }
+  .empty { padding: 48px 16px; text-align: center; color: var(--muted); }
+  .dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 10px max(10px, env(safe-area-inset-bottom, 0px));
+  }
+  .dock-inner { max-width: 1080px; margin: 0 auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .dock .grow { flex: 1 1 auto; }
+  .dock .status { color: var(--muted); font-size: 12.5px; }
+  .export-box { max-width: 1080px; margin: 0 auto 10px; }
+  .export-box textarea { min-height: 96px; font-family: var(--mono); font-size: 11.5px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  @media (max-width: 720px) {
+    body { padding-bottom: 250px; }
+    .export-box textarea { min-height: 64px; }
+  }
+  @media (max-width: 520px) {
+    .card-head { flex-direction: column; }
+    .chips { justify-content: flex-start; }
+  }
+</style>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="title-row">
+      <div>
+        <h1>Wiki 人审工作台</h1>
+        <div class="subtitle">只处理 AI 明确无法收敛的候选；勾选后导出 JSON，回灌 <span style="font-family:var(--mono)">review apply</span>。</div>
+      </div>
+      <div class="summary" id="summary"></div>
+    </div>
+    <div class="filters">
+      <label class="sr-only" for="f-collection">Collection</label>
+      <select id="f-collection"></select>
+      <label class="sr-only" for="f-reason">原因</label>
+      <select id="f-reason"></select>
+      <label class="sr-only" for="f-status">状态</label>
+      <select id="f-status">
+        <option value="pending">未处理</option>
+        <option value="reviewed">已复核</option>
+        <option value="all">全部</option>
+      </select>
+      <label class="sr-only" for="f-search">搜索</label>
+      <input id="f-search" type="text" placeholder="搜索名称 / candidate_id / 证据">
+    </div>
+  </div>
+</header>
+
+<main id="list" aria-live="polite"></main>
+
+<div class="dock">
+  <div class="export-box">
+    <label class="sr-only" for="export-json">导出的 JSON</label>
+    <textarea id="export-json" readonly placeholder="点击“生成决策 JSON”后，这里会显示可回灌的 JSON。"></textarea>
+  </div>
+  <div class="dock-inner">
+    <label class="reviewed"><input type="checkbox" id="only-reviewed" checked> 只导出已复核</label>
+    <button class="primary" id="btn-export">生成决策 JSON</button>
+    <button id="btn-copy">复制 JSON</button>
+    <button id="btn-download" class="hide">下载 JSON</button>
+    <button id="btn-import">导入 JSON</button>
+    <input type="file" id="file-import" accept="application/json,.json" class="sr-only">
+    <button class="ghost" id="btn-clear">清除本地记录</button>
+    <span class="grow"></span>
+    <span class="status" id="status"></span>
+  </div>
+</div>
+
+<script id="queue-data" type="application/json">__DATA__</script>
+<script>
+(function () {
+  "use strict";
+  var DATA = JSON.parse(document.getElementById("queue-data").textContent);
+  var STORAGE_KEY = "wiki-human-review-v1";
+  var REASON = {
+    missing_proposal: "缺少提案",
+    missing_challenge: "缺少盲审",
+    challenger_defer: "Challenger defer",
+    unresolved_blocker: "未解决 blocker",
+    challenger_reject: "Challenger 否决",
+    arbiter_low_confidence: "Arbiter 低置信",
+    low_confidence: "置信度 <0.7",
+    missing_merge_target: "merge 目标不存在",
+    thin_evidence: "单篇来源",
+    acronym_unexpanded: "缩写未展开",
+    alias_hypernym: "上位词别名",
+    split_requires_review: "拆分待确认",
+    type_conflict: "类型冲突",
+    decision_conflict: "结论冲突",
+    duplicate_existing_page: "同名/别名冲突",
+    deferred_by_proposer: "Proposer defer"
+  };
+  var ACTION = { accept_new: "新建", merge_into: "并入", alias_only: "仅别名", reject: "拒绝", defer: "待定" };
+  var ACTION_ORDER = ["accept_new", "merge_into", "alias_only", "reject", "defer"];
+  var items = DATA.items || [];
+  var byId = {};
+  items.forEach(function (it) { byId[it.id] = it; });
+
+  function loadStore() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+  function saveStore() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch (e) { /* private mode */ }
+  }
+  var store = loadStore();
+
+  function defaults(it) {
+    return {
+      action: it.action || "defer",
+      canonical: it.canonical || it.surface || "",
+      type: it.type || "entity",
+      aliases: (it.aliases || []).join(", "),
+      merge_into: it.merge_into || "",
+      qualifier: it.qualifier || "",
+      note: "",
+      reviewed: false
+    };
+  }
+  function stateOf(it) {
+    var s = defaults(it);
+    var saved = store[it.id] || {};
+    Object.keys(saved).forEach(function (k) { s[k] = saved[k]; });
+    return s;
+  }
+  function patch(it, p) {
+    store[it.id] = Object.assign(stateOf(it), p);
+    saveStore();
+    updateSummary();
+  }
+  function reset(it) {
+    delete store[it.id];
+    saveStore();
+    updateSummary();
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function reasonLabel(r) { return REASON[r] || r || "未分类"; }
+  function actionLabel(a) { return ACTION[a] || a || "待定"; }
+
+  function filtered() {
+    var col = document.getElementById("f-collection").value;
+    var reason = document.getElementById("f-reason").value;
+    var status = document.getElementById("f-status").value;
+    var q = document.getElementById("f-search").value.trim().toLowerCase();
+    return items.filter(function (it) {
+      var s = stateOf(it);
+      if (col !== "all" && it.collection !== col) return false;
+      if (reason !== "all" && it.reason !== reason) return false;
+      if (status === "pending" && s.reviewed) return false;
+      if (status === "reviewed" && !s.reviewed) return false;
+      if (q) {
+        var hay = [it.surface, it.candidate_id, it.canonical, it.collection, it.reason,
+          (it.evidence || []).map(function (e) { return (e.doc || "") + " " + (e.heading || "") + " " + (e.quote || ""); }).join(" ")
+        ].join(" ").toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+  }
+
+  function evidenceHtml(it) {
+    var ev = (it.evidence || []).slice(0, 2);
+    if (!ev.length) return "";
+    return '<div class="evidence">' + ev.map(function (e) {
+      return '<p class="ev"><span class="src">' + esc(e.doc) + " # " + esc(e.heading) + '</span>' +
+        '<span class="quote">' + esc(e.quote || "") + '</span></p>';
+    }).join("") + "</div>";
+  }
+
+  function objectionsHtml(it) {
+    var objs = (it.objections || []).slice(0, 3);
+    if (!objs.length) return "";
+    return '<details class="objections"><summary>反对意见（' + (it.objections || []).length + '）</summary>' +
+      objs.map(function (o) {
+        return '<div class="obj"><span class="rule">' + esc((o.rule || "?") + "/" + (o.severity || "?")) + "</span> " +
+          esc(o.evidence || "") + (o.fix ? ' <span class="fix">修复：' + esc(o.fix) + "</span>" : "") + "</div>";
+      }).join("") + "</details>";
+  }
+
+  function fieldsHtml(it, s) {
+    var accept = s.action === "accept_new";
+    var merge = s.action === "merge_into" || s.action === "alias_only";
+    return '<div class="fields">' +
+      '<label class="field ' + (accept ? "" : "hide") + '"><span>canonical</span><input type="text" data-field="canonical" value="' + esc(s.canonical) + '"></label>' +
+      '<label class="field ' + (accept ? "" : "hide") + '"><span>type</span><select data-field="type">' +
+        ["entity", "concept", "topic"].map(function (t) { return '<option value="' + t + '"' + (s.type === t ? " selected" : "") + ">" + t + "</option>"; }).join("") +
+      '</select></label>' +
+      '<label class="field ' + (accept ? "" : "hide") + '"><span>aliases（逗号分隔）</span><input type="text" data-field="aliases" value="' + esc(s.aliases) + '"></label>' +
+      '<label class="field ' + (merge ? "" : "hide") + '"><span>merge_into（slug）</span><input type="text" data-field="merge_into" value="' + esc(s.merge_into) + '"></label>' +
+      '<label class="field ' + ((accept || merge) ? "" : "hide") + '"><span>qualifier</span><input type="text" data-field="qualifier" value="' + esc(s.qualifier) + '"></label>' +
+    "</div>";
+  }
+
+  function cardHtml(it) {
+    var s = stateOf(it);
+    var proposal = it.action && it.action !== s.action
+      ? '提案：<code>' + esc(it.action) + "</code> " + esc(it.canonical || "")
+      : '提案：<code>' + esc(it.action) + "</code> " + esc(it.canonical || "");
+    return '<article class="card" data-id="' + esc(it.id) + '" data-action="' + esc(s.action) + '">' +
+      '<div class="card-head"><div><h2>' + esc(it.surface) + '</h2>' +
+        '<div class="meta">' + esc(it.collection) + " · " + esc(it.type || "entity") + " · <span style=\"font-family:var(--mono)\">" + esc(it.candidate_id) + "</span></div></div>" +
+        '<div class="chips"><span class="chip reason">' + esc(reasonLabel(it.reason)) + '</span>' +
+        '<span class="chip conf">置信度 ' + (it.confidence == null ? "—" : Number(it.confidence).toFixed(2)) + "</span></div></div>" +
+      '<div class="proposal">' + proposal + (it.qualifier ? " · qualifier " + esc(it.qualifier) : "") + "</div>" +
+      evidenceHtml(it) + objectionsHtml(it) +
+      '<div class="controls">' +
+        '<div class="actions">' + ACTION_ORDER.map(function (a) {
+          return '<label data-for="' + a + '"><input type="radio" name="action-' + esc(it.id) + '" data-field="action" value="' + a + '"' +
+            (s.action === a ? " checked" : "") + "> " + actionLabel(a) + "</label>";
+        }).join("") + "</div>" +
+        fieldsHtml(it, s) +
+        '<div class="note-row"><textarea data-field="note" placeholder="备注 / 决定理由（可选）">' + esc(s.note) + "</textarea>" +
+          '<label class="reviewed"><input type="checkbox" data-field="reviewed"' + (s.reviewed ? " checked" : "") + "> 已复核</label></div>" +
+        '<div class="card-actions">' +
+          '<button class="accent" data-act="submit-proposal" title="一键采用 Proposer 提案并标记已复核；会覆盖当前选择，但保留备注。仍需导出 JSON 才会写入 wiki。">按提案提交</button>' +
+          '<button data-act="adopt" title="把 Proposer 的 action/canonical/type/aliases/merge_into 填回表单；保留备注和已复核状态。当前选择不同时会要求二次确认。">恢复为提案</button>' +
+          '<button data-act="clear" class="ghost">清空本条</button></div>' +
+      "</div></article>";
+  }
+
+  function render() {
+    var list = document.getElementById("list");
+    var rows = filtered();
+    if (!rows.length) {
+      list.innerHTML = '<div class="empty">没有符合当前筛选条件的条目。</div>';
+    } else {
+      list.innerHTML = rows.map(cardHtml).join("");
+    }
+    updateSummary();
+  }
+
+  function updateSummary() {
+    var reviewed = 0, pending = 0, counts = { accept_new: 0, merge_into: 0, alias_only: 0, reject: 0, defer: 0 };
+    items.forEach(function (it) {
+      var s = stateOf(it);
+      if (s.reviewed) reviewed++; else pending++;
+      counts[s.action] = (counts[s.action] || 0) + 1;
+    });
+    document.getElementById("summary").innerHTML =
+      "<span>共 <b>" + items.length + "</b></span>" +
+      "<span>已复核 <b>" + reviewed + "</b></span>" +
+      "<span>未处理 <b>" + pending + "</b></span>" +
+      "<span>新建 <b>" + counts.accept_new + "</b> · 并入 <b>" + (counts.merge_into + counts.alias_only) + "</b> · 拒绝 <b>" + counts.reject + "</b> · 待定 <b>" + counts.defer + "</b></span>";
+  }
+
+  function buildExport() {
+    var only = document.getElementById("only-reviewed").checked;
+    var decisions = items.filter(function (it) {
+      var s = stateOf(it);
+      return only ? s.reviewed : true;
+    }).map(function (it) {
+      var s = stateOf(it);
+      return {
+        candidate_id: it.candidate_id,
+        collection: it.collection,
+        action: s.action,
+        canonical: s.canonical,
+        type: s.type,
+        aliases: String(s.aliases || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean),
+        merge_into: s.merge_into || null,
+        qualifier: s.qualifier || null,
+        confidence: 1.0,
+        note: s.note || "",
+        reviewed: !!s.reviewed
+      };
+    });
+    return JSON.stringify({ version: 1, exported_at: new Date().toISOString(), decisions: decisions }, null, 2);
+  }
+
+  function setStatus(msg) {
+    document.getElementById("status").textContent = msg;
+  }
+
+  document.getElementById("f-collection").innerHTML =
+    '<option value="all">全部 collection</option>' +
+    (DATA.collections || []).map(function (c) { return '<option value="' + esc(c) + '">' + esc(c) + "</option>"; }).join("");
+  document.getElementById("f-reason").innerHTML =
+    '<option value="all">全部原因</option>' +
+    (DATA.reasons || []).map(function (r) { return '<option value="' + esc(r) + '">' + esc(reasonLabel(r)) + "</option>"; }).join("");
+
+  ["f-collection", "f-reason", "f-status", "f-search"].forEach(function (id) {
+    document.getElementById(id).addEventListener("input", render);
+  });
+
+  document.getElementById("list").addEventListener("input", function (e) {
+    var card = e.target.closest(".card");
+    if (!card) return;
+    var it = byId[card.getAttribute("data-id")];
+    var field = e.target.getAttribute("data-field");
+    if (!it || !field) return;
+    var value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    patch(it, { [field]: value });
+    if (field === "action") {
+      card.setAttribute("data-action", value);
+      var accept = value === "accept_new";
+      var merge = value === "merge_into" || value === "alias_only";
+      card.querySelectorAll(".field").forEach(function (f, i) {
+        var show = i < 3 ? accept : (i === 3 ? merge : (accept || merge));
+        f.classList.toggle("hide", !show);
+      });
+    }
+  });
+
+  document.getElementById("list").addEventListener("change", function (e) {
+    if (e.target && e.target.getAttribute("data-field") === "action") {
+      // input already handled; change is a no-op
+    }
+  });
+
+  document.getElementById("list").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    var card = btn.closest(".card");
+    var it = byId[card.getAttribute("data-id")];
+    if (!it) return;
+    if (btn.getAttribute("data-act") === "submit-proposal") {
+      var sp = defaults(it);
+      sp.note = stateOf(it).note || "";
+      sp.reviewed = true;
+      store[it.id] = sp;
+      saveStore();
+      render();
+      setStatus("已按提案提交并标记已复核：" + it.surface);
+    } else if (btn.getAttribute("data-act") === "adopt") {
+      var cur = stateOf(it);
+      var d = defaults(it);
+      var differs = cur.action !== d.action || cur.canonical !== d.canonical ||
+        cur.type !== d.type || cur.aliases !== d.aliases ||
+        cur.merge_into !== d.merge_into || cur.qualifier !== d.qualifier;
+      if (differs && Date.now() > (adoptArmed[it.id] || 0)) {
+        adoptArmed[it.id] = Date.now() + 4000;
+        btn.textContent = "确认覆盖当前选择";
+        setTimeout(function () { btn.textContent = "恢复为提案"; }, 4000);
+        return;
+      }
+      d.note = cur.note || "";
+      d.reviewed = cur.reviewed;   // 保留用户是否已复核，不擅自改
+      store[it.id] = d;
+      saveStore();
+      render();
+      setStatus("已恢复为提案，并保留备注与复核状态：" + it.surface);
+    } else if (btn.getAttribute("data-act") === "clear") {
+      reset(it);
+      render();
+      setStatus("已清空：" + it.surface);
+    }
+  });
+
+  document.getElementById("btn-export").addEventListener("click", function () {
+    var text = buildExport();
+    document.getElementById("export-json").value = text;
+    document.getElementById("export-json").focus();
+    document.getElementById("export-json").select();
+    setStatus("已生成 " + JSON.parse(text).decisions.length + " 条决策，可复制或另存。");
+  });
+
+  // 本地打开时提供下载；Artifact 内嵌 iframe 里隐藏（下载会被沙箱拦截）。
+  var inFrame = false;
+  try { inFrame = window.self !== window.top; } catch (e) { inFrame = true; }
+  if (!inFrame) document.getElementById("btn-download").classList.remove("hide");
+
+  document.getElementById("btn-download").addEventListener("click", function () {
+    var text = buildExport();
+    var blob = new Blob([text], { type: "application/json;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "human-decisions.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+    document.getElementById("export-json").value = text;
+    setStatus("已下载 human-decisions.json。");
+  });
+
+  document.getElementById("btn-copy").addEventListener("click", function () {
+    var ta = document.getElementById("export-json");
+    if (!ta.value) ta.value = buildExport();
+    var done = function () { setStatus("已复制到剪贴板。"); };
+    var fail = function () { ta.focus(); ta.select(); setStatus("无法自动复制，已选中文本，请按 Ctrl/Cmd+C。"); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(done, fail);
+    } else { fail(); }
+  });
+
+  document.getElementById("btn-import").addEventListener("click", function () {
+    document.getElementById("file-import").click();
+  });
+  document.getElementById("file-import").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var obj = JSON.parse(String(reader.result));
+        var rows = Array.isArray(obj) ? obj : (obj.decisions || []);
+        var n = 0;
+        rows.forEach(function (r) {
+          var key = (r.collection || "") + "::" + r.candidate_id;
+          if (!r.candidate_id || !byId[key]) return;
+          store[key] = {
+            action: r.action || "defer",
+            canonical: r.canonical || byId[key].canonical || "",
+            type: r.type || "entity",
+            aliases: Array.isArray(r.aliases) ? r.aliases.join(", ") : (r.aliases || ""),
+            merge_into: r.merge_into || "",
+            qualifier: r.qualifier || "",
+            note: r.note || "",
+            reviewed: r.reviewed !== false
+          };
+          n++;
+        });
+        saveStore();
+        render();
+        setStatus("已导入 " + n + " 条决策。");
+      } catch (err) {
+        setStatus("导入失败：不是有效的 JSON。");
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  var adoptArmed = {};
+  var clearArmed = 0;
+  document.getElementById("btn-clear").addEventListener("click", function () {
+    var btn = this;
+    if (Date.now() > clearArmed) {
+      clearArmed = Date.now() + 4000;
+      btn.textContent = "再次点击确认清除";
+      setTimeout(function () { btn.textContent = "清除本地记录"; }, 4000);
+      return;
+    }
+    store = {};
+    saveStore();
+    render();
+    document.getElementById("export-json").value = "";
+    btn.textContent = "清除本地记录";
+    setStatus("已清除本地记录。");
+  });
+
+  render();
+})();
+</script>

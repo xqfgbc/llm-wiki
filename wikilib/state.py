@@ -52,7 +52,9 @@ class SourceState:
     headings: List[Dict] = field(default_factory=list)
 
     def heading_keys(self) -> Dict[str, str]:
-        return {h["norm"]: h["orig"] for h in self.headings}
+        # 新状态存小节内容 hash；旧库没有 hash 时退回 orig，
+        # 这样升级后的第一次 update 仍按「整篇变了」处理，不会漏页。
+        return {h["norm"]: (h.get("hash") or h["orig"]) for h in self.headings}
 
 
 def connect(path: str) -> sqlite3.Connection:

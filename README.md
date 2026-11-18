@@ -46,6 +46,35 @@ cp config.local.yaml.example config.local.yaml   # 填 vault 路径与 collectio
 | `query` | 检索，给 `kg-qa` 调用；失败返回空列表，退出码 0 |
 | `status` | 概览与排除项自检 |
 | `exclude list\|add\|why\|remove` | 排除名单维护 |
+| `extract` | 实体/概念候选抽取 + 确定性门禁（P1） |
+| `review build\|apply\|pending\|human\|status` | 对抗复核：盲审工单 / 合并裁决 / 人审队列 |
+| `review html` | 生成可勾选、可备注的人审工作台（默认 `data/review/human_review.html`） |
+| `review human-apply` | 把人审工作台导出的统一 JSON 回灌注册表与建页 order |
+| `review evidence` | 给已有 `mode:new` order 回填 evidence packet（证据片段 + 出处） |
+| `registry list\|show\|check` | 实体注册表 `entities.yaml` |
+| `lexicon list\|add\|check\|missing` | 词汇表：概念 / 专有名词 / 缩写 |
+
+### 实体抽取与对抗复核
+
+```bash
+# 1. 候选 + 门禁
+"$WIKI_PYTHON" -m wikilib.cli extract --collection <name>
+
+# 2. Proposer / Challenger / Arbiter 三个隔离上下文按工单产出
+#    data/review/<name>/proposals.json
+#    data/review/<name>/challenges.json（盲审，只读 _challenge.json）
+#    data/review/<name>/arbiters.json（仅分歧）
+
+# 3. 合并：注册表 + 建页 order + 人审队列
+"$WIKI_PYTHON" -m wikilib.cli review apply --collection <name>
+
+# 4. 词表维护
+"$WIKI_PYTHON" -m wikilib.cli lexicon missing
+"$WIKI_PYTHON" -m wikilib.cli lexicon check
+```
+
+规则与 12 项攻击清单见 `docs/EXTRACTION.md`；日常操作见
+`skills/wiki-extract/SKILL.md`。
 
 ## 数据边界
 
@@ -61,6 +90,10 @@ wikilib/
 ├── exclusions.py   排除名单（四级粒度，两份文件合并）
 ├── normalize.py    源规范化 N1–N7
 ├── chunk.py        自适应切分（按标题层级，绝不切开代码块）
+├── lexicon.py      词汇表：概念 / 专有名词 / 缩写
+├── registry.py     实体注册表 entities.yaml
+├── extract.py      候选抽取 + 确定性门禁
+├── review.py       对抗复核：盲审 / 合并 / 人审队列
 ├── tokenize.py     jieba 预分词（与 AI-KG 同口径，独立实现）
 ├── index.py        建 wiki.sqlite
 ├── query.py        BM25 检索 + 查询形态判定

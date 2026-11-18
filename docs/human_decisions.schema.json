@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "llm-wiki human decisions",
+  "description": "人审工作台导出的统一决策格式；review human-apply 直接读取。",
+  "type": "object",
+  "required": ["version", "decisions"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "exported_at": { "type": "string" },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "collection", "action", "canonical", "type", "aliases", "reviewed"],
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "collection": { "type": "string" },
+          "action": {
+            "enum": ["accept_new", "merge_into", "split", "alias_only", "reject", "defer"]
+          },
+          "canonical": { "type": "string" },
+          "type": { "enum": ["entity", "concept", "topic"] },
+          "aliases": { "type": "array", "items": { "type": "string" } },
+          "merge_into": { "type": ["string", "null"] },
+          "qualifier": { "type": ["string", "null"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "note": { "type": "string" },
+          "reviewed": { "type": "boolean" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

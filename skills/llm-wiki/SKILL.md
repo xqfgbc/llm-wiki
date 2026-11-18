@@ -55,7 +55,10 @@ cd "$WIKI_DIR" && "$WIKI_PYTHON" -m wikilib.cli status
 # → data/orders/<collection>/<slug>.json
 ```
 
-每份 order 含：目标 slug、既有页面内容、来源切片、术语表片段、输出契约。
+每份 order 含：目标 slug、既有页面内容、来源切片、**证据包（evidence[]）**、
+术语表片段、输出契约。有 `evidence[]` 时**先读它**，不要通读源文档；
+每条断言只能来自 `evidence[].quote`。
+
 按 `obsidian/wiki/CLAUDE.md` 的规则撰写，**逐条断言都要带引用**：
 
 ```
@@ -68,6 +71,39 @@ cd "$WIKI_DIR" && "$WIKI_PYTHON" -m wikilib.cli status
 "$WIKI_PYTHON" -m wikilib.cli build          # 重新索引页面
 "$WIKI_PYTHON" -m wikilib.cli lint --strict  # 硬错误必须清零
 ```
+
+### Step 2.5: 新实体抽取与对抗复核
+
+`update` 发现新文档没有命中任何已有页时，会写
+`data/orders/<collection>/_unmatched.json`。这些文档**不要手工建页**，
+交给抽取流程：
+
+```bash
+"$WIKI_PYTHON" -m wikilib.cli extract --collection <name>
+# → data/orders/<name>/extract/_candidates.json / _propose.json
+
+# Claude 按 _propose.json 产出 proposals.json
+"$WIKI_PYTHON" -m wikilib.cli review build --collection <name>
+# → _challenge.json（盲审工单）
+# Claude 盲审后产出 challenges.json
+
+"$WIKI_PYTHON" -m wikilib.cli review apply --collection <name>
+# → entities.yaml + 新页 order + _human_queue.md
+
+# 已有 order 缺证据包时：
+"$WIKI_PYTHON" -m wikilib.cli review evidence
+```
+
+人审工作台（与 `html` 站点不同）：
+
+```bash
+"$WIKI_PYTHON" -m wikilib.cli review html --open
+# 勾选/备注后导出 JSON：
+"$WIKI_PYTHON" -m wikilib.cli review human-apply --file <导出的 JSON>
+```
+
+完整规则见 `docs/EXTRACTION.md` 与 `skills/wiki-extract/SKILL.md`。
+跨 collection 统一抽取加 `--global`。
 
 ### Step 3: 生成站点
 
@@ -97,6 +133,19 @@ cd "$WIKI_DIR" && "$WIKI_PYTHON" -m wikilib.cli status
 
 输出 `{query, shape, expanded_terms, wiki_pages[], source_hits[]}`。
 失败时返回空 `wiki_pages` 且退出码为 0——wiki 没建好不得拖垮问答。
+
+## 实体层命令
+
+| 命令 | 作用 |
+|---|---|
+| `extract` | 候选抽取 + 确定性门禁，产出 proposer 工单 |
+| `review build\|apply\|pending\|status` | 对抗复核与合并裁决 |
+| `review html` | 生成可勾选/备注的人审工作台 `data/review/human_review.html` |
+| `review human-apply` | 回灌人审工作台导出的统一 JSON |
+| `review evidence` | 给已有 `mode:new` order 回填 evidence packet |
+| `review prune` | 清理已完成/重复的 `mode:new` order 到 `_stale/` |
+| `registry list\|show\|check` | 全局实体注册表 `entities.yaml` |
+| `lexicon list\|add\|check\|missing\|provenance` | 全局词汇表与跨 collection 出处 |
 
 ## 排除名单
 

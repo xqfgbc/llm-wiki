@@ -9,6 +9,9 @@ tags: [wiki, html, site, 浏览]
 
 # 打开 Wiki 站点 (wiki-html)
 
+> 本 skill 生成的是**阅读站点**（`data/site/`）。
+> 人审工作台是另一个页面：`review html` → `data/review/human_review.html`，不要混淆。
+
 ## 项目路径配置
 
 ```bash
