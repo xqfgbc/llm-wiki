@@ -85,5 +85,8 @@ export WIKI_PYTHON=/path/to/.venvs/ai-wiki/bin/python3
 ## 注意事项
 
 - 中文提问会自动扩展出英文术语（`expanded_terms` 可见），因为语料多为英文；这不是改写问题，是跨语言召回
+- 页面别名来自 `entities.yaml` 与 `GLOSSARY.md`，缩写/全称也会命中；
+  例如 `VPC`、`Virtual Private Cloud`、`NAT Gateway` 都能搜到对应实体页
+- 默认检索全部 collection；需要限定范围时加 `--collection <name>`
 - 页面的 `body` 是完整正文，可以直接读；`matched_sections` 只标出命中位置
 - 不要为了「答得像样」而引用 `weak` 页；检索不到就说检索不到

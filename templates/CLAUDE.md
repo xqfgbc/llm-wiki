@@ -16,7 +16,8 @@
 ```
 wiki/
 ├── CLAUDE.md          本文件（契约）
-├── GLOSSARY.md        中英唯一译法 + 查询扩展来源
+├── GLOSSARY.md        概念译法 + 专有名词 + 缩写 + 查询扩展来源
+├── entities.yaml      实体注册表（canonical / 类型 / 别名 / 缩写全称）
 ├── EXCLUSIONS.yaml    排除名单（人维护）
 ├── index.md           全站目录（自动生成）
 ├── log.md             操作日志（自动追加）
@@ -177,6 +178,46 @@ status: draft                              # 默认草稿，评审后再置 acti
 3. 删除原笔记（或保留为历史，`status: stale`）
 
 **不要**直接把笔记的 `type` 改掉就算升级——结构校验会立刻失败，这是设计如此。
+
+## 九之三、实体注册表与词汇表
+
+### `entities.yaml`
+
+它是**实体命名的唯一事实源**，记录每个实体的 canonical 名称、类型、别名、
+缩写全称与裁决历史。页面 frontmatter 的 `aliases` 必须与它一致：
+
+- 新实体先进入注册表，再由 `review apply` 产出建页 order；
+- 不要在页面里手工新增别名而不更新注册表；
+- `status` 为 `merged` / `rejected` / `deferred` 的条目不是 active 页，但保留记录便于回滚；
+- 同名不同义必须用 `qualifier` 区分，不能靠不同页面各写一个同名 alias。
+
+### `GLOSSARY.md`
+
+五个分节，各管一件事：
+
+| 分节 | 管什么 | 例 |
+|---|---|---|
+| `## 概念` | 抽象术语的唯一译法 | Credential Brokering → 凭证代理 |
+| `## 专有名词` | 可指称对象 + 类型 + 别名 | VPC（service，别名 Virtual Private Cloud） |
+| `## 缩写` | 缩写 → 全称 | IRSA → IAM Roles for Service Accounts |
+| `## 通用缩写（不建页）` | 只展开、不建页的通用缩写 | API、HTTP、TCP |
+| `## 保留英文` | 不翻译的专名 | AWS KMS、OpenBao、MCP |
+| `## 已知劣质译法` | 禁止写法 | 经纪人、代表流 |
+
+规则：
+
+- 遇到新缩写，先 `lexicon add --kind acronym` 登记全称，再进入抽取/复核；
+- 专有名词的别名与缩写表的全称由加载器自动合并，不会产生重复条目；
+- `lexicon check` 必须 0 冲突、0 缺全称；
+- 页面正文必须用「中文」列的译法；禁用列一次都不许出现。
+
+### 抽取与对抗复核
+
+`extract` 产出候选，`review` 按 Proposer → Challenger（盲审）→ Arbiter 的顺序裁决。
+三个角色必须使用**互相隔离的上下文**：Challenger 不得读 Proposer 的置信度与理由。
+
+只有 `review apply` 写入 `_human_queue.md` 的条目才交给人。人审条目必须回写
+decisions 后重跑，不允许绕过队列直接改页——否则注册表不更新，下一轮会重复问。
 
 ## 十、自检
 

@@ -68,7 +68,30 @@ export WIKI_PYTHON=/path/to/.venvs/ai-wiki/bin/python3
 work order 3 份 → data/orders/agent-security
 ```
 
+重编范围按**小节内容 hash** 计算：只改了某一节时，只重编引用了该节的页面；
+父节（含文档标题）会随子节变化，兄弟小节不受影响。
+旧状态还没有 hash 时，第一次 `update` 会保守地把引用该文档的页全部重编。
+
 **没有变更就跳过 Step 3**，直接进入 Step 4 收尾。
+
+如果输出里有：
+
+```
+未命中已有页的新文档 N 篇 → data/orders/<collection>/_unmatched.json
+```
+
+这些文档**不要手工建页**。交给 `/wiki-extract` 走候选抽取与对抗复核：
+
+```bash
+"$WIKI_PYTHON" -m wikilib.cli extract --collection <name>
+# Claude 产出 proposals.json
+"$WIKI_PYTHON" -m wikilib.cli review build --collection <name>
+# Claude 盲审产出 challenges.json
+"$WIKI_PYTHON" -m wikilib.cli review apply --collection <name>
+```
+
+`review apply` 生成的 `mode:new` order 会落到 `data/orders/<collection>/`，
+和 `update` 的 order 一起按 Step 3 写。
 
 ### Step 3: 按 work order 重写页面
 
@@ -80,7 +103,14 @@ work order 3 份 → data/orders/agent-security
 4. 不同来源冲突时并列，不擅自裁决
 5. **只改 order 里列出的页**——没列出的页必须保持字节不变
 
+**证据优先**：`update` 现在也会按页面引用的 `doc#heading` 从快照里
+自动生成 `evidence[]`；写页时只从这些 quote 取事实，不要通读 `data/raw`。
+需要更多上下文时只读 evidence 指向的 `doc#heading`。
+如果确实要关闭证据包，用 `update --no-evidence`。
+
 order 的 `mode` 为 `new` 时是候选新页，没有既有内容。
+来自 `/wiki-extract` 的实体页 order 还带 `candidate_id`、`frontmatter`、
+`entity_review`，按同一套七段契约写。
 
 ### Step 4: 收尾
 
@@ -123,3 +153,16 @@ order 的 `mode` 为 `new` 时是候选新页，没有既有内容。
 - **work order 是唯一依据**：不要自行扩大重编范围，否则增量就不可信了。
 - `lint` 的 `red_link` 警告是知识缺口，不是错误；`stale` 说明来源变了但页面没重编。
 - 首次对某个 collection 跑 `update` 只建立基线、不产出 order——这是正常的。
+- 新实体不要绕过 `extract → review` 手工建页；否则注册表、别名、人审队列不会更新。
+- 人审工作台是 `review html`，不是 `html` 站点。
+
+## 相关新命令
+
+| 命令 | 用途 |
+|---|---|
+| `extract` | 新实体候选抽取 + 确定性门禁 |
+| `review build\|apply` | 对抗复核（Proposer / Challenger / Arbiter） |
+| `review evidence` | 给已有订单回填证据包 |
+| `review html` / `human-apply` | 人审工作台与回灌 |
+| `registry check` | 实体注册表冲突检查 |
+| `lexicon check\|missing` | 词汇表完整性检查 |

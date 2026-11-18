@@ -472,5 +472,91 @@ class TestPlanAndUsage(Base):
                          os.path.realpath(self.src))
 
 
+class TestIncrementalImpact(Base):
+    """update 的细化：只重编真正改了小节的页。"""
+
+    DOC = """---
+title: 架构
+---
+## 网络
+
+VPC 提供子网。
+
+### 路由
+
+路由表决定流量。
+
+### 安全组
+
+安全组控制入站。
+
+## 计算
+
+EC2 提供实例。
+"""
+
+    def _doc(self, text, name="a.md"):
+        self.write(name, text)
+        ex = exclusions.load(self.wiki)
+        return normalize.normalize_document(
+            os.path.join(self.src, name), name, "notes", ex, self.cfg)
+
+    def _state(self, doc):
+        return state.SourceState(
+            doc_id=doc.doc_id, rel_path=doc.rel_path, sha256=doc.sha256,
+            headings=[{"norm": h.norm, "orig": h.orig, "hash": h.content_hash}
+                      for h in doc.headings])
+
+    def test_sibling_section_hash_is_stable(self):
+        a = self._doc(self.DOC, "a.md")
+        b = self._doc(self.DOC.replace("安全组控制入站。", "安全组只允许 443。"),
+                      "b.md")
+        ha = {h.norm: h.content_hash for h in a.headings}
+        hb = {h.norm: h.content_hash for h in b.headings}
+        self.assertNotEqual(ha["安全组"], hb["安全组"])
+        self.assertEqual(ha["路由"], hb["路由"], "兄弟小节不应受影响")
+        self.assertEqual(ha["计算"], hb["计算"])
+
+    def test_parent_hash_includes_child_section(self):
+        a = self._doc(self.DOC, "a.md")
+        b = self._doc(self.DOC.replace("安全组控制入站。", "安全组只允许 443。"),
+                      "b.md")
+        ha = {h.norm: h.content_hash for h in a.headings}
+        hb = {h.norm: h.content_hash for h in b.headings}
+        self.assertNotEqual(ha["网络"], hb["网络"],
+                            "子节变化必须让父节 hash 变化")
+
+    def test_only_pages_citing_changed_section_recompile(self):
+        a = self._doc(self.DOC, "a.md")
+        b = self._doc(self.DOC.replace("安全组控制入站。", "安全组只允许 443。"),
+                      "b.md")
+        pages = [
+            {"slug": "network", "source_refs": ["a"],
+             "sources": [{"doc": "a", "cites": [{"heading": "网络"}]}]},
+            {"slug": "routing", "source_refs": ["a"],
+             "sources": [{"doc": "a", "cites": [{"heading": "路由"}]}]},
+            {"slug": "security", "source_refs": ["a"],
+             "sources": [{"doc": "a", "cites": [{"heading": "安全组"}]}]},
+        ]
+        diff = plan.Diff(modified=["a"])
+        hits = plan.impact(diff, pages, {}, {"a": self._state(b)},
+                           {"a": self._state(a)})
+        slugs = {h.page for h in hits}
+        self.assertEqual(slugs, {"network", "security"})
+        self.assertNotIn("routing", slugs, "未改动小节的页面不应重编")
+
+    def test_legacy_state_falls_back_to_whole_doc(self):
+        a = self._doc(self.DOC, "a.md")
+        legacy = state.SourceState(
+            doc_id="a", rel_path="a.md", sha256="old",
+            headings=[{"norm": h.norm, "orig": h.orig} for h in a.headings])
+        pages = [{"slug": "routing", "source_refs": ["a"],
+                  "sources": [{"doc": "a", "cites": [{"heading": "路由"}]}]}]
+        hits = plan.impact(plan.Diff(modified=["a"]), pages, {},
+                           {"a": self._state(a)}, {"a": legacy})
+        self.assertEqual([h.page for h in hits], ["routing"],
+                         "旧状态没有 hash 时应保守重编引用页")
+
+
 if __name__ == "__main__":
     unittest.main()

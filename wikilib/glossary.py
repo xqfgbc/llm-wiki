@@ -1,13 +1,11 @@
 """术语表：中英唯一译法 + 查询扩展来源。
 
-为什么查询要做术语扩展
-----------------------
-试点语料 8 篇里 6 篇是英文，而提问基本是中文。BM25 是词法检索，
-中文「凭证」在英文正文里一个字符都匹配不到，直接问会全篇落空。
-所以把 `GLOSSARY.md` 的中英对照拿来做查询扩展：命中中文就补上英文写法。
+这个模块现在是 `lexicon` 的查询视图：
+  * `Glossary.forms`  —— 中文 → 全部写法（中文/英文/缩写/全称），供 BM25 扩展
+  * `Glossary.banned` —— 已知劣质译法
+  * `Glossary.keep_en` —— 保留英文的专名
 
-扩展只加召回，不改排序语义；`normalize_term` 与 AI-KG 同口径（去分隔符、小写），
-这样 `Token Vault` / `token-vault` / `TokenVault` 会被认成同一个词。
+词表本体（概念 / 专有名词 / 缩写）在 `wikilib/lexicon.py`。
 """
 from __future__ import annotations
 
@@ -16,18 +14,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from . import lexicon as lexicon_mod
+from .lexicon import normalize_term
 from .tokenize import query_terms
 
-_CJK = re.compile(r"[\u4e00-\u9fff]")
-_TABLE_ROW = re.compile(r"^\|(.+)\|\s*$")
-_SEP_ROW = re.compile(r"^\|[\s:\-|]+\|$")
+_CJK = re.compile(r"[一-鿿]")
 
 MAX_EXPANSION = 40
-
-
-def normalize_term(text: str) -> str:
-    """去分隔符 + 小写。与 AI-KG 的 `kb/normalize.normalize_term` 同口径。"""
-    return re.sub(r"[\s\-_·・]+", "", (text or "")).strip().lower()
 
 
 @dataclass
@@ -35,6 +28,7 @@ class Glossary:
     forms: Dict[str, List[str]] = field(default_factory=dict)   # 规范中文 -> 全部写法
     banned: List[str] = field(default_factory=list)
     keep_en: List[str] = field(default_factory=list)
+    lexicon: lexicon_mod.Lexicon = field(default_factory=lexicon_mod.Lexicon)
 
     def expand(self, raw_query: str, terms: List[str]) -> List[str]:
         """把中文提问扩成「中文 + 对应英文」。
@@ -92,49 +86,44 @@ class Glossary:
         return out
 
 
-def _clean_cell(cell: str) -> str:
-    return cell.strip().strip("`").strip()
+def _forms_of(e: lexicon_mod.LexEntry) -> List[str]:
+    """查询扩展用的写法：中文 + 英文 + 缩写全称。"""
+    out: List[str] = []
+    for x in [e.zh, e.canonical, e.expansion] + list(e.aliases):
+        x = (x or "").strip()
+        if x and x not in out:
+            out.append(x)
+    return out
+
+
+def from_lexicon(lex: lexicon_mod.Lexicon) -> Glossary:
+    g = Glossary(lexicon=lex)
+    g.banned = list(lex.banned)
+    g.keep_en = list(lex.keep_en)
+    for e in lex.all_entries():
+        forms = _forms_of(e)
+        # 有中文的，中文作为键；没有中文的（纯缩写/专名），用 canonical 自身作键
+        key = e.zh or e.canonical
+        if not key:
+            continue
+        merged = g.forms.setdefault(key, [])
+        for f in forms:
+            if f not in merged:
+                merged.append(f)
+    return g
 
 
 def load(path: str) -> Glossary:
-    g = Glossary()
-    if not os.path.exists(path):
-        return g
+    return from_lexicon(lexicon_mod.load(path))
 
-    section = ""
-    for line in open(path, encoding="utf-8"):
-        s = line.strip()
-        if s.startswith("##"):
-            section = s.lstrip("#").strip()
-            continue
-        if section.startswith("保留英文"):
-            for item in re.split(r"[·、,，]", s):
-                item = item.strip()
-                if item:
-                    g.keep_en.append(item)
-            continue
-        m = _TABLE_ROW.match(s)
-        if not m or _SEP_ROW.match(s):
-            continue
-        cells = [_clean_cell(c) for c in m.group(1).split("|")]
-        if len(cells) < 2 or cells[0] in ("英文", "---"):
-            continue
-        en, zh = cells[0], cells[1]
-        if not en or not zh or en == "英文":
-            continue
-        forms = [zh, en]
-        if len(cells) >= 3 and cells[2] and cells[2] != "—":
-            g.forms.setdefault(zh, forms)
-        else:
-            g.forms.setdefault(zh, forms)
-        # 禁用译法单列收集
-        if len(cells) >= 3 and cells[2] and cells[2] != "—":
-            for bad in re.split(r"[、,，]", cells[2]):
-                bad = bad.strip()
-                if bad:
-                    g.banned.append(bad)
-    return g
+
+def load_lexicon(path: str) -> lexicon_mod.Lexicon:
+    return lexicon_mod.load(path)
 
 
 def load_for(cfg) -> Glossary:
     return load(os.path.join(cfg.obsidian.wiki_root, "GLOSSARY.md"))
+
+
+def lexicon_for(cfg) -> lexicon_mod.Lexicon:
+    return lexicon_mod.load(os.path.join(cfg.obsidian.wiki_root, "GLOSSARY.md"))

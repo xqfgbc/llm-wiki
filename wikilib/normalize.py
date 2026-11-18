@@ -77,6 +77,7 @@ class HeadingRec:
     repaired: bool = False
     confidence: str = "none"      # high | low | none
     synthetic: bool = False       # 由独立加粗行提升而来，原文里没有对应标题
+    content_hash: str = ""        # 本节及子节内容的 hash，用于增量定位
 
 
 @dataclass
@@ -379,6 +380,14 @@ def normalize_document(path: str, rel_path: str, collection: str,
             headings.insert(0, HeadingRec(level=1, orig="", norm=title,
                                           line=0, synthetic=True))
 
+    # 每节记一个「自身 + 子节」的内容 hash。update 用它判断哪些小节真的变了：
+    # 只改 H3 时，父级 H2/H1 也会变，但兄弟小节不受影响。
+    # 注意：`write_raw` 里 map.json 的 hash 仍是旧的「单节」算法，
+    # 页面 cites[].hash 与 lint 的 stale 检测依赖它，不能混用。
+    tree_hashes = _heading_hashes(body, headings)
+    for h, digest in zip(headings, tree_hashes):
+        h.content_hash = digest
+
     doc = NormalizedDoc(
         doc_id=doc_id,
         rel_path=rel_path,
@@ -520,4 +529,28 @@ def _section_texts(body: str):
             buf.append(line)
     if cur:
         out.append((cur, "\n".join(buf).strip()))
+    return out
+
+
+def _heading_hashes(body: str, headings: List[HeadingRec]) -> List[str]:
+    """每个标题的「自身 + 所有子节」内容 hash，与 headings 一一对应。
+
+    父子关系按层级推断：H2 的范围一直到下一个同级或更高级标题。
+    父节 hash 包含子节，所以子节变化时引用父节的页面也会重编；
+    兄弟小节互不影响，这是 update 能缩小重编范围的关键。
+    """
+    sections = dict(_section_texts(body))
+    own = []
+    for h in headings:
+        own.append(hashlib.md5(
+            ("%s\x00%s" % (h.orig, sections.get(h.norm, "")))
+            .encode("utf-8")).hexdigest()[:8])
+    out = []
+    for i, h in enumerate(headings):
+        parts = [own[i]]
+        for j in range(i + 1, len(headings)):
+            if headings[j].level <= h.level:
+                break
+            parts.append(own[j])
+        out.append(hashlib.md5("\x00".join(parts).encode("utf-8")).hexdigest()[:8])
     return out
