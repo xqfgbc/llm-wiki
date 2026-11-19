@@ -318,8 +318,15 @@ def cmd_update(args) -> int:
             for imp in imps:
                 st = current.get(imp.doc_id)
                 if st:
+                    heads = st.headings
+                    if getattr(imp, "headings", None):
+                        wanted = {contracts.norm_name(h) for h in imp.headings}
+                        picked = [h for h in st.headings
+                                  if contracts.norm_name(h.get("norm", "")) in wanted]
+                        if picked:
+                            heads = picked
                     srcs.append({"doc_id": st.doc_id, "rel_path": st.rel_path,
-                                 "headings": st.headings})
+                                 "headings": heads})
             order = plan_mod.build_order(slug, imps, existing, srcs, excerpt)
             if not getattr(args, "no_evidence", False):
                 plan_mod.attach_evidence(

@@ -65,6 +65,7 @@ class Impact:
     doc_id: str
     reason: str
     mode: str = "recompile"          # recompile | new | stale
+    headings: List[str] = field(default_factory=list)  # 新文档命中的小节
 
 
 def diff_sources(current: Dict[str, SourceState],
@@ -147,8 +148,8 @@ def triage_new(doc_id: str, pages: List[Dict], titles: Dict[str, str],
                state: SourceState) -> List[Impact]:
     """新文档的三种处置。"""
     names = {contracts.norm_name(doc_id)}
-    for h in state.headings:
-        names.add(contracts.norm_name(h.get("norm", "")))
+    heading_norms = {contracts.norm_name(h.get("norm", "")) for h in state.headings}
+    names |= heading_norms
 
     hits = []
     for page in pages:
@@ -161,12 +162,16 @@ def triage_new(doc_id: str, pages: List[Dict], titles: Dict[str, str],
         matched = sorted({d for d in names for pnm in page_names
                           if len(d) >= 4 and len(pnm) >= 4 and (d in pnm or pnm in d)})
         if matched:
-            hits.append((page["slug"], matched[:3]))
+            # 只把真正命中的小节带进 order / evidence，
+            # 不要把新文档的「前 6 个标题」当成相关证据。
+            heads = [h for h in matched if h in heading_norms]
+            hits.append((page["slug"], matched[:3], heads or sorted(heading_norms)))
 
     if hits:
         return [Impact(page=slug, doc_id=doc_id,
-                       reason="新文档命中已有页：%s" % ", ".join(o), mode="recompile")
-                for slug, o in hits]
+                       reason="新文档命中已有页：%s" % ", ".join(o),
+                       mode="recompile", headings=heads)
+                for slug, o, heads in hits]
     return [Impact(page="(候选)", doc_id=doc_id,
                    reason="新文档无既有页命中，进入候选池", mode="new")]
 

@@ -432,6 +432,20 @@ class TestPlanAndUsage(Base):
         hits = plan.triage_new(st.doc_id, [page], {}, st)
         self.assertEqual(hits[0].page, "hitl", "包含匹配应当命中")
 
+    def test_triage_new_carries_matched_headings(self):
+        """新文档命中页时，order 只带命中的小节，而不是整篇前 6 个标题。"""
+        st = state.SourceState(
+            doc_id="服务注册、发现与配置管理", rel_path="x.md", sha256="h",
+            headings=[
+                {"norm": "1.1 服务拆分的判断依据", "orig": "1.1 服务拆分的判断依据"},
+                {"norm": "9.2 Kubernetes Deployment 要点",
+                 "orig": "9.2 Kubernetes Deployment 要点"},
+            ])
+        page = {"slug": "deployment", "title": "Deployment", "aliases": []}
+        hits = plan.triage_new(st.doc_id, [page], {}, st)
+        self.assertEqual(hits[0].headings,
+                         [contracts.norm_name("9.2 Kubernetes Deployment 要点")])
+
     def test_usage_import_is_idempotent(self):
         """同一会话导入两次不能翻倍——用假 record 直接验增量逻辑。"""
         usage.record(self.cfg, usage.new_record(
