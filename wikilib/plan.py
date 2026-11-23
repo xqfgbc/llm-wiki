@@ -131,6 +131,25 @@ def impact(diff: Diff, pages: List[Dict], titles: Dict[str, str],
                                           if changed else "文档级变更（小节内容未变）")),
                             mode="stale" if doc_id in diff.deleted else "recompile"))
 
+    # 已有文档新增的小节：页面还没引用过它，changed_headings 看不到。
+    # 按标题与页名/别名的匹配补一次 triage，否则新增章节永远不会进入 order。
+    for doc_id in diff.modified:
+        prev_norms = {contracts.norm_name(h.get("norm", ""))
+                      for h in previous[doc_id].headings}
+        added = [str(h.get("norm", "")) for h in current[doc_id].headings
+                 if contracts.norm_name(h.get("norm", "")) not in prev_norms]
+        if not added:
+            continue
+        for imp in triage_headings(doc_id, added, pages):
+            existing = next((x for x in out
+                             if x.page == imp.page and x.doc_id == doc_id), None)
+            if existing:
+                existing.headings = sorted(set(existing.headings) | set(imp.headings))
+                existing.reason += "；" + imp.reason
+            else:
+                hit.add((imp.page, doc_id))
+                out.append(imp)
+
     for doc_id in diff.added:
         out.extend(triage_new(doc_id, pages, titles, current[doc_id]))
     return out
@@ -142,6 +161,35 @@ def src_headings(page: Dict, src_ref: str, titles: Dict[str, str],
         if resolve_doc_id(str(s.get("doc", "")), titles) == doc_id:
             return [str(c.get("heading", "")) for c in (s.get("cites") or [])]
     return []
+
+
+def _page_names(page: Dict) -> Set[str]:
+    names = {contracts.norm_name(page["slug"]), contracts.norm_name(page["title"])}
+    for a in page.get("aliases", []):
+        names.add(contracts.norm_name(a))
+    return names
+
+
+def triage_headings(doc_id: str, headings: List[str],
+                    pages: List[Dict]) -> List[Impact]:
+    """文档新增的小节 → 命中已有页。
+
+    修改已有文档时，新加的小节不会出现在任何页面的 cites 里，
+    旧逻辑因此不会产出 order。这里按标题与页名/别名的包含关系补一次 triage。
+    """
+    heading_norms = {contracts.norm_name(h) for h in headings if h}
+    out: List[Impact] = []
+    for page in pages:
+        page_names = _page_names(page)
+        matched = sorted({
+            h for h in heading_norms for pnm in page_names
+            if len(h) >= 4 and len(pnm) >= 4 and (h in pnm or pnm in h)})
+        if matched:
+            out.append(Impact(
+                page=page["slug"], doc_id=doc_id,
+                reason="新增小节命中已有页：%s" % ", ".join(matched[:3]),
+                mode="recompile", headings=matched))
+    return out
 
 
 def triage_new(doc_id: str, pages: List[Dict], titles: Dict[str, str],
@@ -176,11 +224,11 @@ def triage_new(doc_id: str, pages: List[Dict], titles: Dict[str, str],
                    reason="新文档无既有页命中，进入候选池", mode="new")]
 
 
-def _section_map(body: str) -> List[Tuple[str, str, int]]:
-    """把规范化正文按标题切段，返回 [(heading, text, start_offset)]。"""
+def _section_map(body: str) -> List[Tuple[str, str, int, int]]:
+    """把规范化正文按标题切段，返回 [(heading, text, start_offset, level)]。"""
     lines = body.split("\n")
-    out: List[Tuple[str, str, int]] = []
-    cur: Optional[Tuple[str, int]] = None
+    out: List[Tuple[str, str, int, int]] = []
+    cur: Optional[Tuple[str, int, int]] = None
     buf: List[str] = []
     offset = 0
     in_fence = False
@@ -190,14 +238,14 @@ def _section_map(body: str) -> List[Tuple[str, str, int]]:
         m = None if in_fence else HEADING_RE.match(line)
         if m:
             if cur:
-                out.append((cur[0], "\n".join(buf), cur[1]))
-            cur = (m.group(2).strip(), offset + len(line) + 1)
+                out.append((cur[0], "\n".join(buf), cur[1], cur[2]))
+            cur = (m.group(2).strip(), offset + len(line) + 1, len(m.group(1)))
             buf = []
         elif cur:
             buf.append(line)
         offset += len(line) + 1
     if cur:
-        out.append((cur[0], "\n".join(buf), cur[1]))
+        out.append((cur[0], "\n".join(buf), cur[1], cur[2]))
     return out
 
 
@@ -254,37 +302,53 @@ def attach_evidence(order: Dict, raw_dir: str, existing_page: str = "",
         except Exception:
             title, body = doc_id, ""
             raw = ""
-        heads: List[str] = []
-        for key in (contracts.norm_name(title), contracts.norm_name(doc_id)):
-            heads.extend(cited.get(key, []))
-        if not heads:
-            heads = [str(h.get("norm") or h.get("orig") or "")
-                     for h in (src.get("headings") or [])][:6]
+        # 新小节 / 新文档的 order 用 order 里筛过的 headings；
+        # 普通 update 才回退到页面 cites，避免把整篇的前 6 个标题当证据。
+        src_heads = [str(h.get("norm") or h.get("orig") or "")
+                     for h in (src.get("headings") or [])]
+        if src.get("focus"):
+            heads = src_heads
+        else:
+            heads = []
+            for key in (contracts.norm_name(title), contracts.norm_name(doc_id)):
+                heads.extend(cited.get(key, []))
+            if not heads:
+                heads = src_heads[:6]
         sections = _section_map(body or raw)
         for head in heads:
             if not head:
                 continue
             key = contracts.norm_name(head)
-            for heading, text, start in sections:
+            for idx, (heading, text, start, level) in enumerate(sections):
                 if contracts.norm_name(heading) != key:
                     continue
-                for q in _quote_candidates(text, 2):
-                    dedupe_key = (doc_id, heading, q)
-                    if dedupe_key in seen:
-                        continue
-                    seen.add(dedupe_key)
-                    evidence.append({
-                        "collection": collection,
-                        "doc": title,
-                        "doc_id": doc_id,
-                        "heading": heading,
-                        "heading_path": heading,
-                        "quote": q,
-                        "offset": body.find(q),
-                        "definitional": bool(DEFINITION_RE.search(q)),
-                        "in_code": False,
-                        "in_table": False,
-                    })
+                # 父节本身可能只有子标题和表格（如「18. … 的协作」）：
+                # 把它的子节一起纳入，否则证据包会是空的。
+                group = [(heading, text)]
+                j = idx + 1
+                while j < len(sections) and sections[j][3] > level:
+                    group.append((sections[j][0], sections[j][1]))
+                    j += 1
+                for gh, gt in group:
+                    for q in _quote_candidates(gt, 2):
+                        dedupe_key = (doc_id, gh, q)
+                        if dedupe_key in seen:
+                            continue
+                        seen.add(dedupe_key)
+                        evidence.append({
+                            "collection": collection,
+                            "doc": title,
+                            "doc_id": doc_id,
+                            "heading": gh,
+                            "heading_path": gh,
+                            "quote": q,
+                            "offset": body.find(q),
+                            "definitional": bool(DEFINITION_RE.search(q)),
+                            "in_code": False,
+                            "in_table": False,
+                        })
+                        if len(evidence) >= limit:
+                            break
                     if len(evidence) >= limit:
                         break
                 break

@@ -446,6 +446,18 @@ class TestPlanAndUsage(Base):
         self.assertEqual(hits[0].headings,
                          [contracts.norm_name("9.2 Kubernetes Deployment 要点")])
 
+    def test_modified_doc_new_headings_are_triaged(self):
+        pages = [{"slug": "kube-proxy", "title": "kube-proxy", "aliases": []},
+                 {"slug": "service", "title": "Service", "aliases": []}]
+        hits = plan.triage_headings(
+            "服务注册、发现与配置管理",
+            ["15. kube-proxy 的实现原理", "16. Service 概念", "20. 第二部分总览"],
+            pages)
+        by_page = {h.page: h.headings for h in hits}
+        self.assertIn("kube-proxy", by_page)
+        self.assertIn("service", by_page)
+        self.assertNotIn("20. 第二部分总览", by_page["kube-proxy"])
+
     def test_usage_import_is_idempotent(self):
         """同一会话导入两次不能翻倍——用假 record 直接验增量逻辑。"""
         usage.record(self.cfg, usage.new_record(

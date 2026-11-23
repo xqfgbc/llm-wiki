@@ -314,19 +314,32 @@ def cmd_update(args) -> int:
                 continue
             path = next((p.path for p in pages if p.slug == slug), None)
             existing = open(path, encoding="utf-8").read() if path else ""
-            srcs = []
+            src_by_doc = {}
             for imp in imps:
                 st = current.get(imp.doc_id)
-                if st:
-                    heads = st.headings
-                    if getattr(imp, "headings", None):
-                        wanted = {contracts.norm_name(h) for h in imp.headings}
-                        picked = [h for h in st.headings
-                                  if contracts.norm_name(h.get("norm", "")) in wanted]
-                        if picked:
-                            heads = picked
-                    srcs.append({"doc_id": st.doc_id, "rel_path": st.rel_path,
-                                 "headings": heads})
+                if not st:
+                    continue
+                heads = st.headings
+                focused = False
+                if getattr(imp, "headings", None):
+                    wanted = {contracts.norm_name(h) for h in imp.headings}
+                    picked = [h for h in st.headings
+                              if contracts.norm_name(h.get("norm", "")) in wanted]
+                    if picked:
+                        heads = picked
+                        focused = True
+                src = src_by_doc.setdefault(st.doc_id, {
+                    "doc_id": st.doc_id, "rel_path": st.rel_path, "headings": []})
+                if focused:
+                    src["focus"] = True
+                seen = {contracts.norm_name(h.get("norm", ""))
+                        for h in src["headings"]}
+                for h in heads:
+                    key = contracts.norm_name(h.get("norm", ""))
+                    if key not in seen:
+                        src["headings"].append(h)
+                        seen.add(key)
+            srcs = list(src_by_doc.values())
             order = plan_mod.build_order(slug, imps, existing, srcs, excerpt)
             if not getattr(args, "no_evidence", False):
                 plan_mod.attach_evidence(
